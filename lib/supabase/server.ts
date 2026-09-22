@@ -82,6 +82,14 @@ export function getServerSupabase(): SupabaseClient | null {
         persistSession: false,
         autoRefreshToken: false,
       },
+      global: {
+        fetch: (url, options) => {
+          return fetch(url, {
+            ...options,
+            signal: options?.signal || AbortSignal.timeout(2000),
+          });
+        },
+      },
     });
   } catch (err) {
     reportSupabaseFailure(err);

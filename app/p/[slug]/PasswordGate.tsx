@@ -50,10 +50,12 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!isPublic && (!password.trim() || loading)) return;
-    await performLogin(password.trim());
+    const domInput = e.currentTarget?.querySelector('input[type="password"]') as HTMLInputElement | null;
+    const pwdToSubmit = password.trim() || domInput?.value?.trim() || '';
+    if (!isPublic && (!pwdToSubmit || loading)) return;
+    await performLogin(pwdToSubmit);
   };
 
   useEffect(() => {
