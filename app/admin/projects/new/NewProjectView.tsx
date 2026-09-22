@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -49,10 +49,10 @@ export function NewProjectView() {
               : `/api/admin/preview?path=${encodeURIComponent(permanentPath)}`)
         );
       } else {
-        alert(data.error || 'ÙØ´Ù„ Ø±ÙØ¹ ØµÙˆØ±Ø© Ø§Ù„ØºÙ„Ø§Ù');
+        alert(data.error || 'فشل رفع صورة الغلاف');
       }
     } catch {
-      alert('Ø­Ø¯Ø« Ø®Ø·Ø£ Ø£Ø«Ù†Ø§Ø¡ Ø±ÙØ¹ ØµÙˆØ±Ø© Ø§Ù„ØºÙ„Ø§Ù');
+      alert('حدث خطأ أثناء رفع صورة الغلاف');
     } finally {
       setUploadingCover(false);
     }
@@ -83,29 +83,29 @@ export function NewProjectView() {
 
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || 'Ø­Ø¯Ø« Ø®Ø·Ø£ Ø£Ø«Ù†Ø§Ø¡ Ø¥Ù†Ø´Ø§Ø¡ Ø§Ù„Ù…Ø´Ø±ÙˆØ¹');
+        setError(data.error || 'حدث خطأ أثناء إنشاء المشروع');
       } else {
         router.push('/admin');
         router.refresh();
       }
     } catch {
-      setError('ÙØ´Ù„ Ø§Ù„Ø§ØªØµØ§Ù„ Ø¨Ø§Ù„Ø®Ø§Ø¯Ù…');
+      setError('فشل الاتصال بالخادم');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-studio-bg flex flex-col">
+    <div className="min-h-screen bg-studio-bg flex flex-col" dir="rtl">
       <AdminNavbar />
 
       <main className="mx-auto flex-1 w-full max-w-3xl px-4 py-8 sm:px-6">
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white">Ø¥Ø¶Ø§ÙØ© Ù…Ø´Ø±ÙˆØ¹ Ø¬Ø¯ÙŠØ¯</h1>
+            <h1 className="text-2xl font-bold text-white">إضافة مشروع جديد</h1>
             <p className="mt-1 text-xs text-studio-text-secondary">
-              Ø£Ø¯Ø®Ù„ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø£Ø³Ø§Ø³ÙŠØ© ÙˆÙ†Ø³Ø¨Ø© Ø§Ù„Ø¥Ù†Ø¬Ø§Ø² Ù„ØªØ¬Ù‡ÙŠØ² Ø§Ù„Ù…Ø´Ø±ÙˆØ¹
+              أدخل البيانات الأساسية ونسبة الإنجاز لتجهيز المشروع
             </p>
           </div>
           <Link
@@ -113,7 +113,7 @@ export function NewProjectView() {
             className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-studio-surface px-3.5 py-2 text-xs text-studio-text-secondary hover:text-white transition"
           >
             <ArrowRight className="h-4 w-4" />
-            <span>Ø±Ø¬ÙˆØ¹ Ù„Ù„Ù…Ø´Ø§Ø±ÙŠØ¹</span>
+            <span>رجوع للمشاريع</span>
           </Link>
         </div>
 
@@ -126,25 +126,25 @@ export function NewProjectView() {
               </div>
             )}
 
-            {/* Ø§Ø³Ù… Ø§Ù„Ù…Ø´Ø±ÙˆØ¹ */}
+            {/* اسم المشروع */}
             <div>
               <label className="block text-xs font-semibold text-white mb-2">
-                Ø§Ø³Ù… Ø§Ù„Ù…Ø´Ø±ÙˆØ¹ <span className="text-red-400">*</span>
+                اسم المشروع <span className="text-red-400">*</span>
               </label>
               <input
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Ù…Ø«Ø§Ù„: Ù‡ÙˆÙŠØ© Ø§Ù„Ù‚Ù†Ø§Ø© 2027ØŒ Ù‡ÙˆÙŠØ© Ø§Ù„Ø£Ø®Ø¨Ø§Ø±ØŒ ..."
+                placeholder="مثال: هوية القناة 2027، هوية الأخبار، ..."
                 required
                 className="w-full rounded-xl border border-white/10 bg-studio-surface px-4 py-2.5 text-sm text-white placeholder-studio-text-muted outline-none transition focus:border-studio-blue focus:ring-1 focus:ring-studio-blue"
               />
             </div>
 
-            {/* ØµÙˆØ±Ø© Ø§Ù„ØºÙ„Ø§Ù */}
+            {/* صورة الغلاف */}
             <div>
               <label className="block text-xs font-semibold text-white mb-2">
-                ØµÙˆØ±Ø© Ø§Ù„ØºÙ„Ø§Ù (Ø±Ø§Ø¨Ø· Ø£Ùˆ Ø±ÙØ¹ Ù…Ù„Ù)
+                صورة الغلاف (رابط أو رفع ملف)
               </label>
               <div className="flex flex-col sm:flex-row gap-3">
                 <input
@@ -154,12 +154,12 @@ export function NewProjectView() {
                     setCoverUrl(e.target.value);
                     setCoverPreviewUrl(e.target.value);
                   }}
-                  placeholder="https://... Ø£Ùˆ Ù‚Ù… Ø¨Ø±ÙØ¹ ØµÙˆØ±Ø©"
+                  placeholder="https://... أو قم برفع صورة"
                   className="flex-1 rounded-xl border border-white/10 bg-studio-surface px-4 py-2.5 text-sm text-white placeholder-studio-text-muted outline-none transition focus:border-studio-blue"
                 />
                 <label className="flex items-center justify-center gap-2 cursor-pointer rounded-xl border border-white/10 bg-studio-surface px-4 py-2.5 text-xs font-semibold text-studio-text-secondary hover:bg-studio-card hover:text-white transition">
                   <Upload className="h-4 w-4 text-studio-blue-glow" />
-                  <span>{uploadingCover ? 'Ø¬Ø§Ø±Ù Ø§Ù„Ø±ÙØ¹...' : 'Ø±ÙØ¹ ØµÙˆØ±Ø©'}</span>
+                  <span>{uploadingCover ? 'جارٍ الرفع...' : 'رفع صورة'}</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -186,36 +186,36 @@ export function NewProjectView() {
               )}
             </div>
 
-            {/* ÙˆØµÙ Ù…Ø®ØªØµØ± (optional) */}
+            {/* وصف مختصر (optional) */}
             <div>
               <label className="block text-xs font-semibold text-white mb-2">
-                ÙˆØµÙ Ù…Ø®ØªØµØ± (Ø§Ø®ØªÙŠØ§Ø±ÙŠ)
+                وصف مختصر (اختياري)
               </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Ù†Ø¨Ø°Ø© Ù…ÙˆØ¬Ø²Ø© Ø¹Ù† Ù†Ø·Ø§Ù‚ Ø§Ù„Ø¹Ù…Ù„ Ø§Ù„ÙÙ†ÙŠ ÙˆØ§Ù„Ù…Ø®Ø±Ø¬Ø§Øª..."
+                placeholder="نبذة موجزة عن نطاق العمل الفني والمخرجات..."
                 rows={3}
                 className="w-full rounded-xl border border-white/10 bg-studio-surface p-3 text-sm text-white placeholder-studio-text-muted outline-none transition focus:border-studio-blue focus:ring-1 focus:ring-studio-blue"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              {/* Ø§Ù„ØªØµÙ†ÙŠÙ (optional) */}
+              {/* التصنيف (optional) */}
               <div>
                 <label className="block text-xs font-semibold text-white mb-2">
-                  Ø§Ù„ØªØµÙ†ÙŠÙ (Ø§Ø®ØªÙŠØ§Ø±ÙŠ)
+                  التصنيف (اختياري)
                 </label>
                 <input
                   type="text"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  placeholder="Ù…Ø«Ø§Ù„: Ù‡ÙˆÙŠØ§Øª ØªÙ„ÙØ²ÙŠÙˆÙ†ÙŠØ©ØŒ Ø¨Ø±Ø§Ù…Ø¬ Ø­ÙˆØ§Ø±ÙŠØ©"
+                  placeholder="مثال: هويات تلفزيونية، برامج حوارية"
                   className="w-full rounded-xl border border-white/10 bg-studio-surface px-4 py-2.5 text-sm text-white placeholder-studio-text-muted outline-none transition focus:border-studio-blue"
                 />
               </div>
 
-              {/* ØªÙØ¹ÙŠÙ„ ÙˆØªØ®ØµÙŠØµ Ø´Ø±ÙŠØ· Ø§Ù„Ø¥Ù†Ø¬Ø§Ø² */}
+              {/* تفعيل وتخصيص شريط الإنجاز */}
               <div className="rounded-xl border border-white/5 bg-studio-surface/60 p-4 space-y-3">
                 <label className="flex items-center gap-3 cursor-pointer">
                   <input
@@ -225,17 +225,17 @@ export function NewProjectView() {
                     className="h-4 w-4 rounded border-white/20 bg-studio-surface text-studio-blue focus:ring-studio-blue"
                   />
                   <span className="text-xs font-semibold text-white">
-                    ØªØ¶Ù…ÙŠÙ† Ø´Ø±ÙŠØ· Ø§Ù„Ø¥Ù†Ø¬Ø§Ø² ÙÙŠ Ù‡Ø°Ø§ Ø§Ù„Ù…Ø´Ø±ÙˆØ¹
+                    تضمين شريط الإنجاز في هذا المشروع
                   </span>
                 </label>
                 <p className="text-[11px] text-studio-text-muted mr-7">
-                  ÙŠÙ…ÙƒÙ†Ùƒ Ø¥Ù„ØºØ§Ø¡ Ø´Ø±ÙŠØ· Ø§Ù„Ø¥Ù†Ø¬Ø§Ø² Ø¥Ø°Ø§ ÙƒØ§Ù† Ù‡Ø°Ø§ Ø§Ù„Ù…Ø´Ø±ÙˆØ¹ Ù„Ø§ ÙŠØªØ·Ù„Ø¨ Ø¹Ø±Ø¶ Ù†Ø³Ø¨Ø© Ù…Ø¦ÙˆÙŠØ© Ù„Ù„Ø¹Ù…ÙŠÙ„.
+                  يمكنك إلغاء شريط الإنجاز إذا كان هذا المشروع لا يتطلب عرض نسبة مئوية للعميل.
                 </p>
 
                 {showProgress && (
                   <div className="pt-2 border-t border-white/5 space-y-2">
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-semibold text-studio-text-secondary">Ù†Ø³Ø¨Ø© Ø§Ù„Ø¥Ù†Ø¬Ø§Ø² Ø§Ù„Ø£ÙˆÙ„ÙŠØ© (0â€“100%)</label>
+                      <label className="text-xs font-semibold text-studio-text-secondary">نسبة الإنجاز الأولية (0–100%)</label>
                       <span className="text-xs font-mono font-bold text-studio-gold">{progress}%</span>
                     </div>
                     <div className="flex items-center gap-3">
@@ -261,14 +261,14 @@ export function NewProjectView() {
               </div>
             </div>
 
-            {/* Ø®ÙŠØ§Ø± ÙˆØ¶Ø¹ Ù…Ù„ÙØ§Øª Ø§Ù„Ù…Ø´Ø±ÙˆØ¹: ØªÙØ§Ø¹Ù„ÙŠ Ø£Ùˆ Ù„Ù„Ø¹Ø±Ø¶ ÙÙ‚Ø· */}
+            {/* خيار وضع ملفات المشروع: تفاعلي أو للعرض فقط */}
             <div className="rounded-xl border border-white/10 bg-studio-surface/60 p-4 space-y-3">
               <label className="text-xs font-semibold text-white block">
-                Ø·Ø¨ÙŠØ¹Ø© Ù…Ù„ÙØ§Øª Ø§Ù„Ù…Ø´Ø±ÙˆØ¹ ÙˆØªÙØ§Ø¹Ù„ Ø§Ù„Ø¹Ù…ÙŠÙ„:
+                طبيعة ملفات المشروع وتفاعل العميل:
               </label>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* ØªÙØ§Ø¹Ù„ÙŠ (Ù…Ø±Ø§Ø¬Ø¹Ø© ÙˆØ§Ø¹ØªÙ…Ø§Ø¯) */}
+                {/* تفاعلي (مراجعة واعتماد) */}
                 <div
                   onClick={() => setAllowFeedback(true)}
                   className={`cursor-pointer rounded-xl border p-3.5 transition flex flex-col justify-between ${
@@ -287,15 +287,15 @@ export function NewProjectView() {
                     />
                     <div className="flex items-center gap-1.5 font-bold text-xs text-white">
                       <MessageSquare className="h-3.5 w-3.5 text-studio-blue-glow" />
-                      <span>ØªÙØ§Ø¹Ù„ÙŠ (Ù…Ø±Ø§Ø¬Ø¹Ø© ÙˆØ§Ø¹ØªÙ…Ø§Ø¯)</span>
+                      <span>تفاعلي (مراجعة واعتماد)</span>
                     </div>
                   </div>
                   <p className="text-[11px] text-studio-text-muted leading-relaxed mr-5">
-                    ÙŠØªÙŠØ­ Ù„Ù„Ø¹Ù…ÙŠÙ„ ÙƒØªØ§Ø¨Ø© Ø§Ù„Ù…Ù„Ø§Ø­Ø¸Ø§Øª ÙˆØ§Ù„ØªØ¹Ù„ÙŠÙ‚Ø§Øª Ø¹Ù„Ù‰ Ø§Ù„ÙÙŠØ¯ÙŠÙˆØŒ Ø§Ø¹ØªÙ…Ø§Ø¯ Ø§Ù„Ù…Ù„ÙØ§ØªØŒ ÙˆØ¸Ù‡ÙˆØ± ÙˆØ³Ù… Ù…Ø±Ø­Ù„Ø© Ø§Ù„Ø¹Ù…Ù„ (V1).
+                    يتيح للعميل كتابة الملاحظات والتعليقات على الفيديو، اعتماد الملفات، وظهور وسم مرحلة العمل (V1).
                   </p>
                 </div>
 
-                {/* Ù„Ù„Ø¹Ø±Ø¶ ÙˆØ§Ù„ØªØ­Ù…ÙŠÙ„ ÙˆØ§Ù„Ù…Ø´Ø§Ø±ÙƒØ© ÙÙ‚Ø· */}
+                {/* للعرض والتحميل والمشاركة فقط */}
                 <div
                   onClick={() => setAllowFeedback(false)}
                   className={`cursor-pointer rounded-xl border p-3.5 transition flex flex-col justify-between ${
@@ -314,17 +314,17 @@ export function NewProjectView() {
                     />
                     <div className="flex items-center gap-1.5 font-bold text-xs text-white">
                       <Eye className="h-3.5 w-3.5 text-studio-blue-glow" />
-                      <span>Ù„Ù„Ø¹Ø±Ø¶ ÙˆØ§Ù„ØªØ­Ù…ÙŠÙ„ ÙˆØ§Ù„Ù…Ø´Ø§Ø±ÙƒØ© ÙÙ‚Ø·</span>
+                      <span>للعرض والتحميل والمشاركة فقط</span>
                     </div>
                   </div>
                   <p className="text-[11px] text-studio-text-muted leading-relaxed mr-5">
-                    Ø¹Ø±Ø¶ Ø§Ù„ØµÙˆØ± ÙˆØ§Ù„ÙÙŠØ¯ÙŠÙˆ Ø¨Ø­Ø¬Ù… ÙƒØ§Ù…Ù„ ÙˆØ¨Ø¯ÙˆÙ† Ø®Ø§Ù†Ø© Ø§Ù„Ù…Ù„Ø§Ø­Ø¸Ø§Øª Ø£Ùˆ Ø²Ø± Ø§Ù„Ø§Ø¹ØªÙ…Ø§Ø¯ Ø£Ùˆ ÙˆØ³Ù… Ø§Ù„Ù†Ø³Ø®Ø© (V1).
+                    عرض الصور والفيديو بحجم كامل وبدون خانة الملاحظات أو زر الاعتماد أو وسم النسخة (V1).
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Ø¸Ø§Ù‡Ø± Ù„Ù„Ø¹Ù…ÙŠÙ„ yes/no */}
+            {/* ظاهر للعميل yes/no */}
             <div className="pt-2 border-t border-white/5">
               <label className="flex items-center gap-3 cursor-pointer">
                 <input
@@ -334,11 +334,11 @@ export function NewProjectView() {
                   className="h-4 w-4 rounded border-white/20 bg-studio-surface text-studio-blue focus:ring-studio-blue"
                 />
                 <span className="text-xs font-semibold text-white">
-                  Ø¸Ø§Ù‡Ø± Ù„Ù„Ø¹Ù…ÙŠÙ„ (Yes / No)
+                  ظاهر للعميل (Yes / No)
                 </span>
               </label>
               <p className="mt-1 text-[11px] text-studio-text-muted mr-7">
-                ÙÙŠ Ø­Ø§Ù„ Ø¥Ù„ØºØ§Ø¡ Ø§Ù„ØªØ­Ø¯ÙŠØ¯ØŒ Ù„Ù† ÙŠØ¸Ù‡Ø± Ù‡Ø°Ø§ Ø§Ù„Ù…Ø´Ø±ÙˆØ¹ ÙÙŠ ØµÙØ­Ø§Øª Ø§Ù„Ø¹Ø±Ø¶ Ø§Ù„Ø®Ø§ØµØ© Ø¨Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡.
+                في حال إلغاء التحديد، لن يظهر هذا المشروع في صفحات العرض الخاصة بالعملاء.
               </p>
             </div>
 
@@ -348,7 +348,7 @@ export function NewProjectView() {
                 href="/admin"
                 className="rounded-xl border border-white/10 bg-studio-surface px-5 py-2.5 text-xs font-semibold text-studio-text-secondary hover:text-white transition"
               >
-                Ø¥Ù„ØºØ§Ø¡
+                إلغاء
               </Link>
               <button
                 type="submit"
@@ -360,7 +360,7 @@ export function NewProjectView() {
                 ) : (
                   <>
                     <Check className="h-4 w-4" />
-                    <span>Ø­ÙØ¸ Ø§Ù„Ù…Ø´Ø±ÙˆØ¹</span>
+                    <span>حفظ المشروع</span>
                   </>
                 )}
               </button>
