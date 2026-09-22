@@ -71,6 +71,18 @@ export const ProjectAssetsManager: React.FC<ProjectAssetsManagerProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // 1. Instant preview
+    const objectUrl = URL.createObjectURL(file);
+    setCoverUrl(objectUrl);
+
+    // 2. Read base64 as safe offline fallback
+    const readBase64 = new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string) || '');
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+
     setUploadingCover(true);
     try {
       const formData = new FormData();
@@ -86,10 +98,20 @@ export const ProjectAssetsManager: React.FC<ProjectAssetsManagerProps> = ({
       if (res.ok && (data.storagePath || data.url)) {
         setCoverUrl(data.storagePath || data.url);
       } else {
-        alert(data.error || 'فشل رفع صورة الغلاف');
+        const fallbackDataUrl = await readBase64;
+        if (fallbackDataUrl) {
+          setCoverUrl(fallbackDataUrl);
+        } else {
+          alert(data.error || 'فشل رفع صورة الغلاف');
+        }
       }
     } catch {
-      alert('حدث خطأ أثناء رفع صورة الغلاف');
+      const fallbackDataUrl = await readBase64;
+      if (fallbackDataUrl) {
+        setCoverUrl(fallbackDataUrl);
+      } else {
+        alert('حدث خطأ أثناء رفع صورة الغلاف');
+      }
     } finally {
       setUploadingCover(false);
     }

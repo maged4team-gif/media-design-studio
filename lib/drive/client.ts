@@ -635,6 +635,78 @@ export async function initiateResumableUpload(params: {
   return sessionUrl;
 }
 
+/**
+ * Uploads a buffer directly to Google Drive via multipart upload (ideal for covers and images < 10MB)
+ */
+export async function uploadBufferToDrive(params: {
+  filename: string;
+  mimeType: string;
+  parentFolderId: string;
+  buffer: Buffer;
+  makePublic?: boolean;
+}): Promise<{ fileId: string; viewUrl: string; thumbnailUrl: string }> {
+  const token = await getValidAccessToken();
+  const boundary = '-------' + crypto.randomUUID();
+  const delimiter = `\r\n--${boundary}\r\n`;
+  const closeDelimiter = `\r\n--${boundary}--`;
+
+  const metadata = JSON.stringify({
+    name: params.filename,
+    parents: [params.parentFolderId],
+  });
+
+  const multipartBody = Buffer.concat([
+    Buffer.from(
+      delimiter +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+      metadata +
+      delimiter +
+      `Content-Type: ${params.mimeType}\r\n\r\n`
+    ),
+    params.buffer,
+    Buffer.from(closeDelimiter),
+  ]);
+
+  const res = await fetch(`${DRIVE_UPLOAD_BASE}/files?uploadType=multipart&fields=id,name,thumbnailLink,webViewLink`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': `multipart/related; boundary=${boundary}`,
+      'Content-Length': multipartBody.length.toString(),
+    },
+    body: multipartBody,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`DRIVE_UPLOAD_FAILED: ${err.error?.message || `HTTP ${res.status}`}`);
+  }
+
+  const fileData = await res.json();
+  const fileId = fileData.id;
+
+  if (params.makePublic) {
+    try {
+      await fetch(`${DRIVE_API_BASE}/files/${fileId}/permissions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+      });
+    } catch {
+      // Non-fatal if permission cannot be altered
+    }
+  }
+
+  return {
+    fileId,
+    viewUrl: `https://lh3.googleusercontent.com/d/${fileId}`,
+    thumbnailUrl: fileData.thumbnailLink || `https://drive.google.com/thumbnail?id=${fileId}&sz=w1200`,
+  };
+}
+
 export interface UploadChunkResult {
   complete: boolean;
   fileId?: string;

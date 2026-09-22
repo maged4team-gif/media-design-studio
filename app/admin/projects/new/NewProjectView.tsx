@@ -27,6 +27,18 @@ export function NewProjectView() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // 1. Instant local preview
+    const objectUrl = URL.createObjectURL(file);
+    setCoverPreviewUrl(objectUrl);
+
+    // 2. Read base64 as safe offline fallback
+    const readBase64 = new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string) || '');
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+
     setUploadingCover(true);
     try {
       const formData = new FormData();
@@ -44,15 +56,29 @@ export function NewProjectView() {
         setCoverUrl(permanentPath);
         setCoverPreviewUrl(
           data.previewUrl ||
-            (permanentPath.startsWith('http') || permanentPath.startsWith('/uploads/')
+            (permanentPath.startsWith('http') || permanentPath.startsWith('/uploads/') || permanentPath.startsWith('data:')
               ? permanentPath
               : `/api/admin/preview?path=${encodeURIComponent(permanentPath)}`)
         );
       } else {
-        alert(data.error || 'فشل رفع صورة الغلاف');
+        // Fallback to Base64 Data URL so user is never blocked from saving project
+        const fallbackDataUrl = await readBase64;
+        if (fallbackDataUrl) {
+          setCoverUrl(fallbackDataUrl);
+          setCoverPreviewUrl(fallbackDataUrl);
+        } else {
+          alert(data.error || 'فشل رفع صورة الغلاف');
+        }
       }
     } catch {
-      alert('حدث خطأ أثناء رفع صورة الغلاف');
+      // Network drop or fetch failed - apply offline Base64 fallback
+      const fallbackDataUrl = await readBase64;
+      if (fallbackDataUrl) {
+        setCoverUrl(fallbackDataUrl);
+        setCoverPreviewUrl(fallbackDataUrl);
+      } else {
+        alert('حدث خطأ أثناء رفع صورة الغلاف');
+      }
     } finally {
       setUploadingCover(false);
     }

@@ -584,7 +584,7 @@ export async function resolveAssetPlaybackUrl(
 export async function resolveProjectCoverUrl(project: Project, expiresInSeconds: number = 7200): Promise<string | null> {
   const isDirectWebUrl = (url: string | null | undefined): boolean => {
     if (!url) return false;
-    return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/uploads/') || url.startsWith('/api/');
+    return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/uploads/') || url.startsWith('/api/') || url.startsWith('data:');
   };
 
   const targetPath = project.cover_storage_path || (!isDirectWebUrl(project.cover_url) ? project.cover_url : null);
@@ -694,7 +694,7 @@ export function normalizeProjectCoverData(data: Partial<Project>): void {
 
     const isDirectWebUrl = (u: string | null | undefined): boolean => {
       if (!u) return false;
-      return u.startsWith('http://') || u.startsWith('https://') || u.startsWith('/uploads/');
+      return u.startsWith('http://') || u.startsWith('https://') || u.startsWith('/uploads/') || u.startsWith('/api/') || u.startsWith('data:');
     };
 
     if (rawCover === null || (rawCover === undefined && rawPath === null)) {

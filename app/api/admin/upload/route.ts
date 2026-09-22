@@ -3,7 +3,7 @@ import { getAdminSession, extractCookieFromRequest } from '@/lib/auth/session';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { dataService, getDataMode } from '@/lib/data/service';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
-import { isDriveConfigured } from '@/lib/drive/client';
+import { isDriveConfigured, ensureArchiveRootFolder, uploadBufferToDrive } from '@/lib/drive/client';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -99,75 +99,115 @@ export async function POST(req: Request) {
     const uniqueKey = crypto.randomUUID();
     const storagePath = `projects/${projectId || 'common'}/${uniqueKey}_${sanitizedBase}.${ext}`;
 
-    // 6. Upload to Supabase Storage if configured
-    if (getDataMode() === 'supabase') {
-      const supabase = getServerSupabase();
-      if (!supabase) {
-        return NextResponse.json({ error: 'خدمة Supabase غير متاحة حالياً' }, { status: 500 });
-      }
+    const buffer = Buffer.from(await file.arrayBuffer());
 
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const { error: uploadError } = await supabase.storage
-        .from('media-studio-assets')
-        .upload(storagePath, buffer, {
-          contentType: file.type || 'application/octet-stream',
-          upsert: false,
+    // 6. Tier 1: Upload to Google Drive if configured (primary studio storage)
+    if (isDriveConfigured()) {
+      try {
+        const rootFolderId = await ensureArchiveRootFolder();
+        const driveResult = await uploadBufferToDrive({
+          filename: `cover_${sanitizedBase}_${uniqueKey}.${ext}`,
+          mimeType: file.type || 'image/jpeg',
+          parentFolderId: rootFolderId,
+          buffer,
+          makePublic: true,
         });
 
-      if (uploadError) {
-        console.error('Supabase storage upload error:', uploadError);
-        // Do NOT silently fall back to public/uploads
-        return NextResponse.json(
-          { error: `فشل رفع الملف إلى التخزين السحابي: ${uploadError.message}` },
-          { status: 500 }
-        );
+        return NextResponse.json({
+          success: true,
+          storagePath: driveResult.viewUrl,
+          url: driveResult.viewUrl,
+          previewUrl: driveResult.viewUrl,
+          name: originalName,
+          size: file.size,
+          mimeType: file.type,
+          driveFileId: driveResult.fileId,
+        });
+      } catch (driveErr: any) {
+        console.warn('Google Drive direct upload failed, attempting storage fallback:', driveErr?.message || driveErr);
+      }
+    }
+
+    // 7. Tier 2: Upload to Supabase Storage if configured and healthy
+    if (getDataMode() === 'supabase') {
+      try {
+        const supabase = getServerSupabase();
+        if (supabase) {
+          const { error: uploadError } = await supabase.storage
+            .from('media-studio-assets')
+            .upload(storagePath, buffer, {
+              contentType: file.type || 'application/octet-stream',
+              upsert: false,
+            });
+
+          if (!uploadError) {
+            const { data: signData } = await supabase.storage
+              .from('media-studio-assets')
+              .createSignedUrl(storagePath, 3600);
+
+            return NextResponse.json({
+              success: true,
+              storagePath,
+              url: storagePath, // Permanent internal reference
+              previewUrl: signData?.signedUrl || `/api/admin/preview?path=${encodeURIComponent(storagePath)}`,
+              name: originalName,
+              size: file.size,
+              mimeType: file.type,
+            });
+          }
+          console.warn('Supabase storage upload error:', uploadError);
+        }
+      } catch (supaErr: any) {
+        console.warn('Supabase storage upload exception:', supaErr?.message || supaErr);
+      }
+    }
+
+    // 8. Tier 3: Resilient Base64 Data URL Fallback for images (<= 4MB)
+    // Ensures admin never gets blocked from setting project covers even if cloud network is offline/paused
+    const isImage = file.type?.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
+    if (isImage && file.size <= 4 * 1024 * 1024) {
+      const base64 = buffer.toString('base64');
+      const dataUrl = `data:${file.type || 'image/jpeg'};base64,${base64}`;
+      return NextResponse.json({
+        success: true,
+        storagePath: dataUrl,
+        url: dataUrl,
+        previewUrl: dataUrl,
+        name: originalName,
+        size: file.size,
+        mimeType: file.type,
+        fallback: true,
+      });
+    }
+
+    // 9. Tier 4: Explicit Local Demo Storage (Strictly non-production dev fallback)
+    if (process.env.NODE_ENV !== 'production') {
+      const localUploadsDir = path.join(process.cwd(), 'public', 'uploads');
+      if (!fs.existsSync(localUploadsDir)) {
+        fs.mkdirSync(localUploadsDir, { recursive: true });
       }
 
-      const { data: signData } = await supabase.storage
-        .from('media-studio-assets')
-        .createSignedUrl(storagePath, 3600);
+      const localFileName = `${uniqueKey}_${sanitizedBase}.${ext}`;
+      const filePath = path.join(localUploadsDir, localFileName);
+      fs.writeFileSync(filePath, buffer);
+
+      const publicUrl = `/uploads/${localFileName}`;
 
       return NextResponse.json({
         success: true,
-        storagePath,
-        url: storagePath, // Permanent internal reference
-        previewUrl: signData?.signedUrl || `/api/admin/preview?path=${encodeURIComponent(storagePath)}`,
+        storagePath: null,
+        url: publicUrl,
+        previewUrl: publicUrl,
         name: originalName,
         size: file.size,
         mimeType: file.type,
       });
     }
 
-    // 7. Explicit Local Demo Storage (Strictly non-production dev fallback)
-    if (process.env.NODE_ENV === 'production') {
-      return NextResponse.json(
-        { error: 'التخزين السحابي Supabase غير مهيأ في بيئة الإنتاج' },
-        { status: 500 }
-      );
-    }
-
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-    const localUploadsDir = path.join(process.cwd(), 'public', 'uploads');
-    if (!fs.existsSync(localUploadsDir)) {
-      fs.mkdirSync(localUploadsDir, { recursive: true });
-    }
-
-    const localFileName = `${uniqueKey}_${sanitizedBase}.${ext}`;
-    const filePath = path.join(localUploadsDir, localFileName);
-    fs.writeFileSync(filePath, buffer);
-
-    const publicUrl = `/uploads/${localFileName}`;
-
-    return NextResponse.json({
-      success: true,
-      storagePath: null,
-      url: publicUrl,
-      previewUrl: publicUrl,
-      name: originalName,
-      size: file.size,
-      mimeType: file.type,
-    });
+    return NextResponse.json(
+      { error: 'تعذر رفع الملف إلى أي وجهة تخزين سحابية متاحة' },
+      { status: 500 }
+    );
   } catch (error: any) {
     console.error('File upload fatal error:', error);
     return NextResponse.json(

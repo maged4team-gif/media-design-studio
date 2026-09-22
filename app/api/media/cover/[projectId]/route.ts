@@ -41,14 +41,31 @@ export async function GET(req: Request, { params }: RouteProps) {
     return NextResponse.json({ error: 'المشروع غير موجود' }, { status: 404 });
   }
 
+  // 3. Directly serve Base64 data URLs if saved as project cover
+  if (project.cover_url?.startsWith('data:')) {
+    const commaIdx = project.cover_url.indexOf(',');
+    if (commaIdx !== -1) {
+      const mimeMatch = project.cover_url.slice(0, commaIdx).match(/:(.*?);/);
+      const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+      const base64Data = project.cover_url.slice(commaIdx + 1);
+      const imgBuffer = Buffer.from(base64Data, 'base64');
+      return new Response(imgBuffer, {
+        headers: {
+          'Content-Type': mime,
+          'Cache-Control': 'public, max-age=86400, immutable',
+        },
+      });
+    }
+  }
+
   const isDirectWebUrl = (u: string | null | undefined): boolean => {
     if (!u) return false;
-    return u.startsWith('http://') || u.startsWith('https://') || u.startsWith('/uploads/');
+    return u.startsWith('http://') || u.startsWith('https://') || u.startsWith('/uploads/') || u.startsWith('data:');
   };
 
   const coverPath = project.cover_storage_path || (!isDirectWebUrl(project.cover_url) ? project.cover_url : null);
 
-  // 3. Resolve private Supabase Storage cover
+  // 4. Resolve private Supabase Storage cover
   if (coverPath && getDataMode() === 'supabase') {
     const supabase = getServerSupabase();
     if (supabase) {
@@ -65,7 +82,7 @@ export async function GET(req: Request, { params }: RouteProps) {
     }
   }
 
-  // 4. External or local fallback (must be a valid web URL, never a raw storage path)
+  // 5. External or local fallback (must be a valid web URL, never a raw storage path)
   if (isDirectWebUrl(project.cover_url)) {
     return NextResponse.redirect(project.cover_url!, { status: 307 });
   }
