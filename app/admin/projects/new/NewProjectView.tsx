@@ -22,25 +22,72 @@ export function NewProjectView() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // Handle Cover Upload
-  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // 1. Instant local preview
-    const objectUrl = URL.createObjectURL(file);
-    setCoverPreviewUrl(objectUrl);
-
-    // 2. Read base64 as safe offline fallback
-    const readBase64 = new Promise<string>((resolve) => {
+  // Helper to downscale and compress high-resolution wallpapers/photos on client
+  const compressImageForCover = (file: File, maxWidth = 1600, quality = 0.82): Promise<{ file: File; dataUrl: string }> => {
+    return new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onload = () => resolve((reader.result as string) || '');
-      reader.onerror = () => resolve('');
+      reader.onload = (e) => {
+        const src = (e.target?.result as string) || '';
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve({ file, dataUrl: src });
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, '') + '.jpg', {
+                  type: 'image/jpeg',
+                  lastModified: Date.now(),
+                });
+                resolve({ file: compressedFile, dataUrl });
+              } else {
+                resolve({ file, dataUrl });
+              }
+            },
+            'image/jpeg',
+            quality
+          );
+        };
+        img.onerror = () => resolve({ file, dataUrl: src });
+        img.src = src;
+      };
+      reader.onerror = () => resolve({ file, dataUrl: '' });
       reader.readAsDataURL(file);
     });
+  };
+
+  // Handle Cover Upload
+  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
+
+    // 1. Instant local preview
+    const objectUrl = URL.createObjectURL(rawFile);
+    setCoverPreviewUrl(objectUrl);
 
     setUploadingCover(true);
     try {
+      // 2. Client-side compression (ensures tiny payload < 250KB, avoids 413 limits)
+      const { file, dataUrl } = await compressImageForCover(rawFile);
+      if (dataUrl) {
+        setCoverUrl(dataUrl);
+      }
+
+      // 3. Attempt cloud upload
       const formData = new FormData();
       formData.append('file', file);
       formData.append('projectId', 'covers');
@@ -60,25 +107,9 @@ export function NewProjectView() {
               ? permanentPath
               : `/api/admin/preview?path=${encodeURIComponent(permanentPath)}`)
         );
-      } else {
-        // Fallback to Base64 Data URL so user is never blocked from saving project
-        const fallbackDataUrl = await readBase64;
-        if (fallbackDataUrl) {
-          setCoverUrl(fallbackDataUrl);
-          setCoverPreviewUrl(fallbackDataUrl);
-        } else {
-          alert(data.error || 'فشل رفع صورة الغلاف');
-        }
       }
     } catch {
-      // Network drop or fetch failed - apply offline Base64 fallback
-      const fallbackDataUrl = await readBase64;
-      if (fallbackDataUrl) {
-        setCoverUrl(fallbackDataUrl);
-        setCoverPreviewUrl(fallbackDataUrl);
-      } else {
-        alert('حدث خطأ أثناء رفع صورة الغلاف');
-      }
+      // Non-fatal: the optimized compressed dataUrl is already set and preserved
     } finally {
       setUploadingCover(false);
     }

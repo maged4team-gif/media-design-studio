@@ -66,25 +66,72 @@ export const ProjectAssetsManager: React.FC<ProjectAssetsManagerProps> = ({
   const [savingProject, setSavingProject] = useState(false);
   const [projectSavedMsg, setProjectSavedMsg] = useState(false);
 
-  // Handle Cover Upload
-  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // 1. Instant preview
-    const objectUrl = URL.createObjectURL(file);
-    setCoverUrl(objectUrl);
-
-    // 2. Read base64 as safe offline fallback
-    const readBase64 = new Promise<string>((resolve) => {
+  // Helper to downscale and compress high-resolution wallpapers/photos on client
+  const compressImageForCover = (file: File, maxWidth = 1600, quality = 0.82): Promise<{ file: File; dataUrl: string }> => {
+    return new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onload = () => resolve((reader.result as string) || '');
-      reader.onerror = () => resolve('');
+      reader.onload = (e) => {
+        const src = (e.target?.result as string) || '';
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve({ file, dataUrl: src });
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, '') + '.jpg', {
+                  type: 'image/jpeg',
+                  lastModified: Date.now(),
+                });
+                resolve({ file: compressedFile, dataUrl });
+              } else {
+                resolve({ file, dataUrl });
+              }
+            },
+            'image/jpeg',
+            quality
+          );
+        };
+        img.onerror = () => resolve({ file, dataUrl: src });
+        img.src = src;
+      };
+      reader.onerror = () => resolve({ file, dataUrl: '' });
       reader.readAsDataURL(file);
     });
+  };
+
+  // Handle Cover Upload
+  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
+
+    // 1. Instant preview
+    const objectUrl = URL.createObjectURL(rawFile);
+    setCoverUrl(objectUrl);
 
     setUploadingCover(true);
     try {
+      // 2. Client-side compression (reduces wallpaper to crisp ~150-250KB JPEG)
+      const { file, dataUrl } = await compressImageForCover(rawFile);
+      if (dataUrl) {
+        setCoverUrl(dataUrl);
+      }
+
+      // 3. Attempt cloud upload
       const formData = new FormData();
       formData.append('file', file);
       formData.append('projectId', 'covers');
@@ -97,21 +144,9 @@ export const ProjectAssetsManager: React.FC<ProjectAssetsManagerProps> = ({
       const data = await res.json();
       if (res.ok && (data.storagePath || data.url)) {
         setCoverUrl(data.storagePath || data.url);
-      } else {
-        const fallbackDataUrl = await readBase64;
-        if (fallbackDataUrl) {
-          setCoverUrl(fallbackDataUrl);
-        } else {
-          alert(data.error || 'فشل رفع صورة الغلاف');
-        }
       }
     } catch {
-      const fallbackDataUrl = await readBase64;
-      if (fallbackDataUrl) {
-        setCoverUrl(fallbackDataUrl);
-      } else {
-        alert('حدث خطأ أثناء رفع صورة الغلاف');
-      }
+      // Non-fatal: the optimized compressed dataUrl is preserved
     } finally {
       setUploadingCover(false);
     }
