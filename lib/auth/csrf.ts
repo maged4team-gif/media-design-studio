@@ -8,7 +8,7 @@ export function verifyRequestOrigin(req: Request): boolean {
     return true;
   }
 
-  const host = req.headers.get('host');
+  const host = (req.headers.get('x-forwarded-host') || req.headers.get('host') || '').split(':')[0];
   const origin = req.headers.get('origin');
   const referer = req.headers.get('referer');
 
@@ -19,8 +19,8 @@ export function verifyRequestOrigin(req: Request): boolean {
   // If origin header is present, compare origin host
   if (origin) {
     try {
-      const originUrl = new URL(origin);
-      if (originUrl.host === host) {
+      const originHost = new URL(origin).host.split(':')[0];
+      if (originHost === host) {
         return true;
       }
     } catch {
@@ -31,8 +31,8 @@ export function verifyRequestOrigin(req: Request): boolean {
   // Fallback to referer header if origin is absent
   if (referer) {
     try {
-      const refererUrl = new URL(referer);
-      if (refererUrl.host === host) {
+      const refererHost = new URL(referer).host.split(':')[0];
+      if (refererHost === host) {
         return true;
       }
     } catch {

@@ -1,18 +1,26 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Shield, Lock, ArrowLeft } from 'lucide-react';
 
 export default function AdminLoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!password || loading) return;
+    if (loading) return;
+
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    const formPassword = (formData.get('password') as string) || '';
+    const finalPassword = formPassword || password;
+
+    if (!finalPassword.trim()) {
+      setError('يرجى إدخال كلمة مرور الإدارة');
+      return;
+    }
 
     setLoading(true);
     setError('');
@@ -21,19 +29,19 @@ export default function AdminLoginPage() {
       const res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ password: finalPassword }),
       });
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || 'كلمة المرور غير صحيحة');
+        setLoading(false);
       } else {
-        router.push('/admin');
-        router.refresh();
+        // Full navigation ensures cookie persistence and bypasses Next.js stale router cache
+        window.location.href = '/admin';
       }
     } catch {
-      setError('حدث خطأ في الاتصال بالخادم');
-    } finally {
+      setError('حدث خطأ في الاتصال بالخادم. يرجى المحاولة مجدداً.');
       setLoading(false);
     }
   };
@@ -64,6 +72,8 @@ export default function AdminLoginPage() {
             <Lock className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-studio-text-muted" />
             <input
               type="password"
+              name="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="كلمة مرور الإدارة"
@@ -81,7 +91,7 @@ export default function AdminLoginPage() {
 
           <button
             type="submit"
-            disabled={loading || !password}
+            disabled={loading}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-500 py-3 px-4 text-sm font-semibold text-white shadow-lg shadow-amber-600/25 transition disabled:opacity-50"
           >
             {loading ? (
