@@ -6,6 +6,7 @@ import {
   ensureArchiveRootFolder,
   saveStoredDriveConfig,
   verifyDriveConnection,
+  getOAuthRedirectUri,
 } from '@/lib/drive/client';
 
 export async function GET(req: Request) {
@@ -39,7 +40,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const redirectUri = `${urlObj.origin}/api/admin/auth/google/callback`;
+    const redirectUri = getOAuthRedirectUri(req);
     const tokens = await exchangeCodeForTokens(code, redirectUri);
 
     if (!tokens.refresh_token) {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAdminSession, extractCookieFromRequest } from '@/lib/auth/session';
-import { getAuthorizationUrl } from '@/lib/drive/client';
+import { getAuthorizationUrl, getOAuthRedirectUri } from '@/lib/drive/client';
 
 export async function GET(req: Request) {
   const adminToken = extractCookieFromRequest(req, 'admin_session');
@@ -11,8 +11,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const urlObj = new URL(req.url);
-    const redirectUri = `${urlObj.origin}/api/admin/auth/google/callback`;
+    const redirectUri = getOAuthRedirectUri(req);
     const authUrl = getAuthorizationUrl(redirectUri, adminToken);
 
     // If client requested JSON

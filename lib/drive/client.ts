@@ -306,6 +306,32 @@ export function verifyOAuthState(state: string, adminSessionToken: string): bool
 }
 
 /**
+ * Resolves the canonical OAuth redirect URI for Google Drive authentication.
+ * Respects reverse proxies (Vercel / x-forwarded-host) and environment overrides.
+ */
+export function getOAuthRedirectUri(req: Request): string {
+  const explicitAppUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL;
+  if (explicitAppUrl) {
+    return `${explicitAppUrl.replace(/\/+$/, '')}/api/admin/auth/google/callback`;
+  }
+
+  const forwardedHost = req.headers.get('x-forwarded-host');
+  const forwardedProto = req.headers.get('x-forwarded-proto') || 'https';
+  if (forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}/api/admin/auth/google/callback`;
+  }
+
+  const host = req.headers.get('host');
+  if (host) {
+    const proto = host.includes('localhost') || host.includes('127.0.0.1') ? 'http' : 'https';
+    return `${proto}://${host}/api/admin/auth/google/callback`;
+  }
+
+  const urlObj = new URL(req.url);
+  return `${urlObj.origin}/api/admin/auth/google/callback`;
+}
+
+/**
  * Generates Google OAuth 2.0 authorization URL
  */
 export function getAuthorizationUrl(redirectUri: string, adminSessionToken: string): string {
@@ -321,7 +347,7 @@ export function getAuthorizationUrl(redirectUri: string, adminSessionToken: stri
     response_type: 'code',
     scope: DRIVE_FILE_SCOPE,
     access_type: 'offline',
-    prompt: 'consent', // Required to obtain refresh_token
+    prompt: 'select_account consent', // Required to obtain refresh_token and allow choosing account
     state,
   });
 

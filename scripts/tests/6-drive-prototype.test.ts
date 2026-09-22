@@ -7,6 +7,7 @@ import {
   generateOAuthState,
   verifyOAuthState,
   getAuthorizationUrl,
+  getOAuthRedirectUri,
   isDriveConfigured,
   ensureArchiveRootFolder,
   ensureProjectFolder,
@@ -124,10 +125,22 @@ async function runDrivePrototypeTests() {
   assert(parsedAuthUrl.origin === 'https://accounts.google.com', 'Auth URL targets accounts.google.com');
   assert(parsedAuthUrl.searchParams.get('client_id') === process.env.GOOGLE_CLIENT_ID, 'Auth URL contains client_id');
   assert(parsedAuthUrl.searchParams.get('access_type') === 'offline', 'Auth URL requests offline access for refresh_token');
-  assert(parsedAuthUrl.searchParams.get('prompt') === 'consent', 'Auth URL forces consent prompt');
+  assert(parsedAuthUrl.searchParams.get('prompt') === 'select_account consent', 'Auth URL forces select_account and consent prompt');
   assert(parsedAuthUrl.searchParams.get('scope') === 'https://www.googleapis.com/auth/drive.file', 'Auth URL requests drive.file scope');
   assert(!authUrl.includes(process.env.GOOGLE_CLIENT_SECRET!), 'Auth URL NEVER leaks client_secret');
   assert(!authUrl.includes(process.env.GOOGLE_DRIVE_REFRESH_TOKEN!), 'Auth URL NEVER leaks refresh_token');
+
+  // getOAuthRedirectUri header-aware resolver
+  const mockReqWithForwarded = new Request('http://internal-cluster/api/admin/auth/google', {
+    headers: {
+      'x-forwarded-host': 'media-design-studio.vercel.app',
+      'x-forwarded-proto': 'https',
+    },
+  });
+  assert(
+    getOAuthRedirectUri(mockReqWithForwarded) === 'https://media-design-studio.vercel.app/api/admin/auth/google/callback',
+    'getOAuthRedirectUri respects x-forwarded-host and x-forwarded-proto'
+  );
 
   // =============================================================
   // 2. Token Refresh & Persistence Across Server Restarts
