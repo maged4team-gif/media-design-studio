@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { Lock, ArrowLeft, Globe } from 'lucide-react';
 
 interface PasswordGateProps {
@@ -22,7 +21,6 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(isPublic);
-  const router = useRouter();
 
   const performLogin = async (pwdToSubmit: string) => {
     setLoading(true);
@@ -42,7 +40,7 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
         if (redirectTo) {
           window.location.href = redirectTo;
         } else {
-          router.refresh();
+          window.location.href = window.location.pathname;
         }
       }
     } catch {

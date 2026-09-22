@@ -1,13 +1,33 @@
 import 'server-only';
-import { getServerSupabase, isServerSupabaseConfigured } from '@/lib/supabase/server';
+import { getServerSupabase, isServerSupabaseConfigured, reportSupabaseFailure, reportSupabaseSuccess } from '@/lib/supabase/server';
 import { Project, Asset, AccessLink, Comment, Approval, StudioNotification } from '@/lib/supabase/database.types';
 import bcrypt from 'bcryptjs';
 import { generateSlug } from '@/lib/utils/slug';
 import fs from 'fs';
 import path from 'path';
 
-// Local storage file for offline development demo only
-const LOCAL_STORE_FILE = path.join(process.cwd(), '.data', 'store.json');
+function getDataDir(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NODE_ENV === 'production') {
+    const tmpDir = path.join('/tmp', '.data');
+    try {
+      if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+      return tmpDir;
+    } catch {
+      // ignore
+    }
+  }
+  const localDir = path.join(process.cwd(), '.data');
+  try {
+    if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+  } catch {
+    // ignore
+  }
+  return localDir;
+}
+
+function getLocalStoreFile(): string {
+  return path.join(getDataDir(), 'store.json');
+}
 
 interface LocalStore {
   projects: Project[];
@@ -26,7 +46,7 @@ interface ProjectSettings {
 
 function getProjectSettingsMap(): Record<string, ProjectSettings> {
   try {
-    const p = path.join(process.cwd(), '.data', 'project-settings.json');
+    const p = path.join(getDataDir(), 'project-settings.json');
     if (fs.existsSync(p)) {
       return JSON.parse(fs.readFileSync(p, 'utf8'));
     }
@@ -44,7 +64,7 @@ interface AssetDriveMapping {
 
 function getAssetDriveMap(): Record<string, AssetDriveMapping> {
   try {
-    const p = path.join(process.cwd(), '.data', 'asset-drive-map.json');
+    const p = path.join(getDataDir(), 'asset-drive-map.json');
     if (fs.existsSync(p)) {
       return JSON.parse(fs.readFileSync(p, 'utf8'));
     }
@@ -56,8 +76,7 @@ function getAssetDriveMap(): Record<string, AssetDriveMapping> {
 
 function removeAssetDriveMapping(assetId: string) {
   try {
-    const dir = path.join(process.cwd(), '.data');
-    const p = path.join(dir, 'asset-drive-map.json');
+    const p = path.join(getDataDir(), 'asset-drive-map.json');
     const existing = getAssetDriveMap();
     if (existing[assetId]) {
       delete existing[assetId];
@@ -70,7 +89,7 @@ function removeAssetDriveMapping(assetId: string) {
 
 function getLinkPasswordsMap(): Record<string, string> {
   try {
-    const p = path.join(process.cwd(), '.data', 'link-passwords.json');
+    const p = path.join(getDataDir(), 'link-passwords.json');
     if (fs.existsSync(p)) {
       return JSON.parse(fs.readFileSync(p, 'utf8'));
     }
@@ -82,7 +101,7 @@ function getLinkPasswordsMap(): Record<string, string> {
 
 function saveLinkPasswordLocal(linkId: string, passwordPlain: string | null) {
   try {
-    const dir = path.join(process.cwd(), '.data');
+    const dir = getDataDir();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const p = path.join(dir, 'link-passwords.json');
     const existing = getLinkPasswordsMap();
@@ -309,6 +328,7 @@ const DEFAULT_SEED_DATA: LocalStore = {
       viewer_name: 'أحمد',
       slug: 'x7K29AbC',
       password_hash: bcrypt.hashSync('2580', 10),
+      password_plain: '2580',
       enabled: true,
       session_version: 1,
       created_at: new Date('2026-01-01T00:00:00Z').toISOString(),
@@ -401,9 +421,10 @@ function getLocalStore(): LocalStore {
     return globalThis.__mediaStudioLocalStore;
   }
 
+  const storeFile = getLocalStoreFile();
   try {
-    if (fs.existsSync(LOCAL_STORE_FILE)) {
-      const data = fs.readFileSync(LOCAL_STORE_FILE, 'utf-8');
+    if (fs.existsSync(storeFile)) {
+      const data = fs.readFileSync(storeFile, 'utf-8');
       const parsed = JSON.parse(data) as LocalStore;
       globalThis.__mediaStudioLocalStore = parsed;
       return parsed;
@@ -422,13 +443,13 @@ function getLocalStore(): LocalStore {
 function saveLocalStore(data: LocalStore): void {
   globalThis.__mediaStudioLocalStore = data;
   try {
-    const dir = path.dirname(LOCAL_STORE_FILE);
+    const storeFile = getLocalStoreFile();
+    const dir = path.dirname(storeFile);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(LOCAL_STORE_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    fs.writeFileSync(storeFile, JSON.stringify(data, null, 2), 'utf-8');
   } catch {
-    // Gracefully handle read-only environments like Vercel Serverless
     // In-memory globalThis.__mediaStudioLocalStore is already updated
   }
 }
@@ -467,14 +488,20 @@ export async function resolveAssetPlaybackUrl(
     if (getDataMode() === 'supabase') {
       const supabase = getServerSupabase();
       if (supabase) {
-        const { data, error } = await supabase.storage
-          .from('media-studio-assets')
-          .createSignedUrl(targetPath, expiresInSeconds);
-        if (error || !data?.signedUrl) {
-          console.error(`Failed to generate signed URL for asset: ${targetPath}`, error);
-          throw new Error('SIGNING_ERROR: Failed to issue secure signed URL for private asset.');
+        try {
+          const { data, error } = await supabase.storage
+            .from('media-studio-assets')
+            .createSignedUrl(targetPath, expiresInSeconds);
+          if (error || !data?.signedUrl) {
+            console.error(`Failed to generate signed URL for asset: ${targetPath}`, error);
+            reportSupabaseFailure(error);
+          } else {
+            reportSupabaseSuccess();
+            return data.signedUrl;
+          }
+        } catch (err) {
+          reportSupabaseFailure(err);
         }
-        return data.signedUrl;
       }
     }
     // Demo proxy route
@@ -501,14 +528,20 @@ export async function resolveProjectCoverUrl(project: Project, expiresInSeconds:
     if (getDataMode() === 'supabase') {
       const supabase = getServerSupabase();
       if (supabase) {
-        const { data, error } = await supabase.storage
-          .from('media-studio-assets')
-          .createSignedUrl(targetPath, expiresInSeconds);
-        if (error || !data?.signedUrl) {
-          console.error(`Failed to generate signed URL for cover: ${targetPath}`, error);
-          return null;
+        try {
+          const { data, error } = await supabase.storage
+            .from('media-studio-assets')
+            .createSignedUrl(targetPath, expiresInSeconds);
+          if (error || !data?.signedUrl) {
+            console.error(`Failed to generate signed URL for cover: ${targetPath}`, error);
+            reportSupabaseFailure(error);
+          } else {
+            reportSupabaseSuccess();
+            return data.signedUrl;
+          }
+        } catch (err) {
+          reportSupabaseFailure(err);
         }
-        return data.signedUrl;
       }
     }
     // Demo mode: Return the protected proxy endpoint instead of raw storage path
@@ -550,14 +583,20 @@ export async function resolveAssetThumbnailUrl(
     if (getDataMode() === 'supabase') {
       const supabase = getServerSupabase();
       if (supabase) {
-        const { data, error } = await supabase.storage
-          .from('media-studio-assets')
-          .createSignedUrl(targetPath, expiresInSeconds);
-        if (error || !data?.signedUrl) {
-          console.error(`Failed to generate signed URL for thumbnail: ${targetPath}`, error);
-          return null;
+        try {
+          const { data, error } = await supabase.storage
+            .from('media-studio-assets')
+            .createSignedUrl(targetPath, expiresInSeconds);
+          if (error || !data?.signedUrl) {
+            console.error(`Failed to generate signed URL for thumbnail: ${targetPath}`, error);
+            reportSupabaseFailure(error);
+          } else {
+            reportSupabaseSuccess();
+            return data.signedUrl;
+          }
+        } catch (err) {
+          reportSupabaseFailure(err);
         }
-        return data.signedUrl;
       }
     }
     // Demo mode: Return the protected thumbnail proxy endpoint instead of raw storage path
@@ -705,6 +744,7 @@ export const dataService = {
             .maybeSingle();
 
           if (!error && data) {
+            reportSupabaseSuccess();
             const hasPassword = Boolean(
               data.password_hash &&
               data.password_hash.trim() !== '' &&
@@ -723,9 +763,11 @@ export const dataService = {
               project_ids: data.access_link_projects?.map((alp: { project_id: string }) => alp.project_id) || [],
             };
           } else if (error) {
+            reportSupabaseFailure(error);
             console.error('[Supabase Error] Failed to fetch access link by slug:', error.message);
           }
         } catch (err: any) {
+          reportSupabaseFailure(err);
           console.error('[Supabase Exception] Failed to query link by slug:', err?.message || err);
         }
       }
@@ -758,33 +800,42 @@ export const dataService = {
   async getAccessLinkAuthDataBySlug(slug: string): Promise<AccessLink | null> {
     const supabase = getServerSupabase();
     if (supabase) {
-      const { data, error } = await supabase
-        .from('access_links')
-        .select('id, viewer_name, slug, password_hash, enabled, session_version, created_at')
-        .eq('slug', slug)
-        .maybeSingle();
+      try {
+        const { data, error } = await supabase
+          .from('access_links')
+          .select('id, viewer_name, slug, password_hash, enabled, session_version, created_at')
+          .eq('slug', slug)
+          .maybeSingle();
 
-      if (error) {
-        throw new Error(`DB_ERROR: Failed to fetch auth data for slug: ${error.message}`);
+        if (!error && data) {
+          reportSupabaseSuccess();
+          const hasPassword = Boolean(
+            data.password_hash &&
+            data.password_hash.trim() !== '' &&
+            data.password_hash !== 'NO_PASSWORD'
+          );
+
+          const localPasswords = getLinkPasswordsMap();
+          return {
+            ...data,
+            password_plain: (data as any).password_plain || localPasswords[data.id] || null,
+            has_password: hasPassword,
+          };
+        } else if (error) {
+          reportSupabaseFailure(error);
+          console.warn('[Supabase Warning] Failed to fetch auth data for slug:', error.message);
+        }
+      } catch (err: any) {
+        reportSupabaseFailure(err);
+        console.warn('[Supabase Exception] getAccessLinkAuthDataBySlug:', err?.message || err);
       }
-      if (!data) return null;
-
-      const hasPassword = Boolean(
-        data.password_hash &&
-        data.password_hash.trim() !== '' &&
-        data.password_hash !== 'NO_PASSWORD'
-      );
-
-      return {
-        ...data,
-        has_password: hasPassword,
-      };
     }
 
     const store = getLocalStore();
     const link = store.access_links.find((l) => l.slug === slug);
     if (!link) return null;
 
+    const localPasswords = getLinkPasswordsMap();
     const hasPassword = Boolean(
       link.password_hash &&
       link.password_hash.trim() !== '' &&
@@ -796,6 +847,7 @@ export const dataService = {
       viewer_name: link.viewer_name,
       slug: link.slug,
       password_hash: link.password_hash,
+      password_plain: link.password_plain || localPasswords[link.id] || null,
       enabled: link.enabled,
       session_version: link.session_version ?? 1,
       created_at: link.created_at,
@@ -826,6 +878,7 @@ export const dataService = {
             .order('created_at', { ascending: false });
 
           if (!projErr && projects) {
+            reportSupabaseSuccess();
             const localSettings = getProjectSettingsMap();
             const mapped = projects.map((p) => {
               hydrateProjectSettings(p, localSettings);
@@ -844,9 +897,14 @@ export const dataService = {
             }
 
             return mapped;
+          } else if (projErr) {
+            reportSupabaseFailure(projErr);
           }
+        } else if (linkErr) {
+          reportSupabaseFailure(linkErr);
         }
       } catch (err: any) {
+        reportSupabaseFailure(err);
         console.error('[Supabase Exception] Failed to get client projects:', err?.message || err);
       }
     }
@@ -870,35 +928,44 @@ export const dataService = {
   async getProjectForClient(linkId: string, projectId: string): Promise<Project | null> {
     const supabase = getServerSupabase();
     if (supabase) {
-      const { data: linkProj, error: linkErr } = await supabase
-        .from('access_link_projects')
-        .select('project_id')
-        .eq('access_link_id', linkId)
-        .eq('project_id', projectId)
-        .maybeSingle();
+      try {
+        const { data: linkProj, error: linkErr } = await supabase
+          .from('access_link_projects')
+          .select('project_id')
+          .eq('access_link_id', linkId)
+          .eq('project_id', projectId)
+          .maybeSingle();
 
-      if (linkErr) {
-        throw new Error(`DB_ERROR: Failed to check project assignment: ${linkErr.message}`);
+        if (!linkErr && linkProj) {
+          const { data: project, error: projErr } = await supabase
+            .from('projects')
+            .select('*')
+            .eq('id', projectId)
+            .eq('is_visible', true)
+            .eq('is_archived', false)
+            .maybeSingle();
+
+          if (!projErr && project) {
+            reportSupabaseSuccess();
+            const localSettings = getProjectSettingsMap();
+            hydrateProjectSettings(project, localSettings);
+            try {
+              project.display_cover_url = await resolveProjectCoverUrl(project);
+            } catch {
+              project.display_cover_url = project.cover_url || null;
+            }
+            return project;
+          } else if (projErr) {
+            reportSupabaseFailure(projErr);
+          }
+        } else if (linkErr) {
+          reportSupabaseFailure(linkErr);
+          console.warn('[Supabase Warning] Failed to check project assignment:', linkErr.message);
+        }
+      } catch (err: any) {
+        reportSupabaseFailure(err);
+        console.warn('[Supabase Exception] getProjectForClient:', err?.message || err);
       }
-      if (!linkProj) return null;
-
-      const { data: project, error: projErr } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('id', projectId)
-        .eq('is_visible', true)
-        .eq('is_archived', false)
-        .maybeSingle();
-
-      if (projErr) {
-        throw new Error(`DB_ERROR: Failed to fetch project: ${projErr.message}`);
-      }
-      if (!project) return null;
-
-      const localSettings = getProjectSettingsMap();
-      hydrateProjectSettings(project, localSettings);
-      project.display_cover_url = await resolveProjectCoverUrl(project);
-      return project;
     }
 
     const store = getLocalStore();
@@ -936,6 +1003,7 @@ export const dataService = {
 
         const { data, error } = await query;
         if (!error && data) {
+          reportSupabaseSuccess();
           const assets = (data || []) as Asset[];
           const driveMap = getAssetDriveMap();
 
@@ -956,9 +1024,11 @@ export const dataService = {
 
           return assets;
         } else if (error) {
+          reportSupabaseFailure(error);
           console.error('[Supabase Error] Failed to fetch assets for project:', error.message);
         }
       } catch (err: any) {
+        reportSupabaseFailure(err);
         console.error('[Supabase Exception] Failed to query assets:', err?.message || err);
       }
     }
@@ -995,23 +1065,29 @@ export const dataService = {
   async getAssetById(assetId: string): Promise<Asset | null> {
     const supabase = getServerSupabase();
     if (supabase) {
-      const { data, error } = await supabase
-        .from('assets')
-        .select('*')
-        .eq('id', assetId)
-        .maybeSingle();
+      try {
+        const { data, error } = await supabase
+          .from('assets')
+          .select('*')
+          .eq('id', assetId)
+          .maybeSingle();
 
-      if (error) {
-        throw new Error(`DB_ERROR: Failed to fetch asset by ID: ${error.message}`);
+        if (!error && data) {
+          reportSupabaseSuccess();
+          const asset = data as Asset;
+          const driveMap = getAssetDriveMap();
+          hydrateAssetDrive(asset, driveMap);
+          asset.playback_url = await resolveAssetPlaybackUrl(asset);
+          asset.display_thumbnail_url = await resolveAssetThumbnailUrl(asset);
+          return asset;
+        } else if (error) {
+          reportSupabaseFailure(error);
+          console.warn(`[Supabase Warning] Failed to fetch asset ${assetId}:`, error.message);
+        }
+      } catch (err: any) {
+        reportSupabaseFailure(err);
+        console.warn(`[Supabase Exception] getAssetById:`, err?.message || err);
       }
-      if (!data) return null;
-
-      const asset = data as Asset;
-      const driveMap = getAssetDriveMap();
-      hydrateAssetDrive(asset, driveMap);
-      asset.playback_url = await resolveAssetPlaybackUrl(asset);
-      asset.display_thumbnail_url = await resolveAssetThumbnailUrl(asset);
-      return asset;
     }
 
     const store = getLocalStore();
@@ -1030,22 +1106,30 @@ export const dataService = {
   ): Promise<Comment> {
     const supabase = getServerSupabase();
     if (supabase) {
-      const { data, error } = await supabase
-        .from('comments')
-        .insert({
-          asset_id: assetId,
-          access_link_id: accessLinkId,
-          author_name: authorName,
-          body,
-          timestamp_seconds: timestampSeconds ?? null,
-        })
-        .select()
-        .single();
+      try {
+        const { data, error } = await supabase
+          .from('comments')
+          .insert({
+            asset_id: assetId,
+            access_link_id: accessLinkId,
+            author_name: authorName,
+            body,
+            timestamp_seconds: timestampSeconds ?? null,
+          })
+          .select()
+          .single();
 
-      if (error || !data) {
-        throw new Error(`DB_ERROR: Failed to insert comment: ${error?.message}`);
+        if (!error && data) {
+          reportSupabaseSuccess();
+          return data as Comment;
+        } else if (error) {
+          reportSupabaseFailure(error);
+          console.warn('[Supabase Warning] Failed to insert comment:', error.message);
+        }
+      } catch (err: any) {
+        reportSupabaseFailure(err);
+        console.warn('[Supabase Exception] addComment:', err?.message || err);
       }
-      return data as Comment;
     }
 
     const store = getLocalStore();
@@ -1076,26 +1160,34 @@ export const dataService = {
         throw new Error('VALIDATION_ERROR: accessLinkId is required to record approval.');
       }
 
-      // Upsert keyed on (asset_id, access_link_id)
-      const { data, error } = await supabase
-        .from('approvals')
-        .upsert(
-          {
-            asset_id: assetId,
-            access_link_id: accessLinkId,
-            viewer_name: viewerName,
-            approved,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'asset_id,access_link_id' }
-        )
-        .select()
-        .single();
+      try {
+        // Upsert keyed on (asset_id, access_link_id)
+        const { data, error } = await supabase
+          .from('approvals')
+          .upsert(
+            {
+              asset_id: assetId,
+              access_link_id: accessLinkId,
+              viewer_name: viewerName,
+              approved,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'asset_id,access_link_id' }
+          )
+          .select()
+          .single();
 
-      if (error || !data) {
-        throw new Error(`DB_ERROR: Failed to update approval: ${error?.message}`);
+        if (!error && data) {
+          reportSupabaseSuccess();
+          return data as Approval;
+        } else if (error) {
+          reportSupabaseFailure(error);
+          console.warn('[Supabase Warning] Failed to update approval:', error.message);
+        }
+      } catch (err: any) {
+        reportSupabaseFailure(err);
+        console.warn('[Supabase Exception] toggleApproval:', err?.message || err);
       }
-      return data as Approval;
     }
 
     const store = getLocalStore();

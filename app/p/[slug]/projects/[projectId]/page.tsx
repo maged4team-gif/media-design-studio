@@ -5,6 +5,9 @@ import { getClientSession } from '@/lib/auth/session';
 import { ProjectDetailView } from './ProjectDetailView';
 import { PasswordGate } from '../../PasswordGate';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 interface PageProps {
   params: Promise<{
     slug: string;
@@ -18,14 +21,24 @@ export default async function ClientProjectPage({ params, searchParams }: PagePr
   const sp = searchParams ? await searchParams : {};
   const isDirect = sp.direct === 'true' || sp.direct === '1';
 
-  // 1. Verify access link
-  const link = await dataService.getAccessLinkBySlug(slug);
+  // 1. Verify access link safely
+  let link = null;
+  try {
+    link = await dataService.getAccessLinkBySlug(slug);
+  } catch (err) {
+    console.error('Failed to get access link:', err);
+  }
   if (!link || !link.enabled) {
     return notFound();
   }
 
   // 2. Strict Server-Side Authorization: Ensure project is assigned to this client
-  const project = await dataService.getProjectForClient(link.id, projectId);
+  let project = null;
+  try {
+    project = await dataService.getProjectForClient(link.id, projectId);
+  } catch (err) {
+    console.error('Failed to get project for client:', err);
+  }
   if (!project) {
     return notFound();
   }

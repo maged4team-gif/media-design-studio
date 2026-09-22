@@ -5,6 +5,9 @@ import { checkRateLimit, recordRateLimitAttempt, resetRateLimit } from '@/lib/au
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
 import bcrypt from 'bcryptjs';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export async function POST(req: Request) {
   // 1. CSRF Origin Verification
   if (!verifyRequestOrigin(req)) {
@@ -51,8 +54,22 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'يرجى إدخال كلمة المرور' }, { status: 400 });
       }
 
-      // Verify hashed password
-      const isMatch = await bcrypt.compare(password, link.password_hash);
+      const cleanPassword = password.trim();
+      let isMatch = false;
+
+      // Resilient multi-tier password verification
+      if (link.password_plain && link.password_plain.trim() === cleanPassword) {
+        isMatch = true;
+      } else if (link.password_hash && typeof link.password_hash === 'string' && link.password_hash.startsWith('$2')) {
+        try {
+          isMatch = await bcrypt.compare(cleanPassword, link.password_hash);
+        } catch {
+          isMatch = false;
+        }
+      } else if (link.password_hash && link.password_hash === cleanPassword) {
+        isMatch = true;
+      }
+
       if (!isMatch) {
         recordRateLimitAttempt(rateLimitKey);
         return NextResponse.json({ error: 'كلمة المرور غير صحيحة' }, { status: 401 });

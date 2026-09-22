@@ -5,6 +5,9 @@ import { getClientSession } from '@/lib/auth/session';
 import { PasswordGate } from './PasswordGate';
 import { ClientHomeView } from './ClientHomeView';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 interface PageProps {
   params: Promise<{
     slug: string;
@@ -14,8 +17,14 @@ interface PageProps {
 export default async function ClientSlugPage({ params }: PageProps) {
   const { slug } = await params;
 
-  // 1. Fetch access link details
-  const link = await dataService.getAccessLinkBySlug(slug);
+  // 1. Fetch access link details safely
+  let link = null;
+  try {
+    link = await dataService.getAccessLinkBySlug(slug);
+  } catch (err) {
+    console.error('Failed to get access link:', err);
+  }
+
   if (!link || !link.enabled) {
     return notFound();
   }
@@ -26,8 +35,13 @@ export default async function ClientSlugPage({ params }: PageProps) {
     return <PasswordGate viewerName={link.viewer_name} slug={slug} isPublic={!link.has_password} />;
   }
 
-  // 3. Fetch only the projects assigned to this access link
-  const projects = await dataService.getProjectsForClient(link.id);
+  // 3. Fetch only the projects assigned to this access link safely
+  let projects: any[] = [];
+  try {
+    projects = await dataService.getProjectsForClient(link.id);
+  } catch (err) {
+    console.error('Failed to get projects for client:', err);
+  }
 
   return (
     <ClientHomeView

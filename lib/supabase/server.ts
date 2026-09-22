@@ -38,6 +38,24 @@ export function isServerSupabaseConfigured(): boolean {
 }
 
 let _testSupabaseClientOverride: SupabaseClient | null = null;
+let _supabaseFailureTimestamp = 0;
+const CIRCUIT_BREAKER_RESET_MS = 60000;
+
+export function isSupabaseHealthy(): boolean {
+  if (_supabaseFailureTimestamp > 0 && Date.now() - _supabaseFailureTimestamp < CIRCUIT_BREAKER_RESET_MS) {
+    return false;
+  }
+  return true;
+}
+
+export function reportSupabaseFailure(err?: any): void {
+  _supabaseFailureTimestamp = Date.now();
+  console.warn('[Supabase Circuit Breaker tripped] Switching to resilient fallback for 60s:', err?.message || err);
+}
+
+export function reportSupabaseSuccess(): void {
+  _supabaseFailureTimestamp = 0;
+}
 
 export function setTestSupabaseClient(client: any | null): void {
   _testSupabaseClientOverride = client;
@@ -46,6 +64,10 @@ export function setTestSupabaseClient(client: any | null): void {
 export function getServerSupabase(): SupabaseClient | null {
   if (_testSupabaseClientOverride) {
     return _testSupabaseClientOverride;
+  }
+
+  if (!isSupabaseHealthy()) {
+    return null;
   }
 
   if (!isServerSupabaseConfigured()) {
@@ -62,6 +84,7 @@ export function getServerSupabase(): SupabaseClient | null {
       },
     });
   } catch (err) {
+    reportSupabaseFailure(err);
     console.error('[Supabase Init Error]:', err);
     return null;
   }
