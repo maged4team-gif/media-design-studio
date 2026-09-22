@@ -1,0 +1,2129 @@
+import 'server-only';
+import { getServerSupabase, isServerSupabaseConfigured } from '@/lib/supabase/server';
+import { Project, Asset, AccessLink, Comment, Approval, StudioNotification } from '@/lib/supabase/database.types';
+import bcrypt from 'bcryptjs';
+import { generateSlug } from '@/lib/utils/slug';
+import fs from 'fs';
+import path from 'path';
+
+// Local storage file for offline development demo only
+const LOCAL_STORE_FILE = path.join(process.cwd(), '.data', 'store.json');
+
+interface LocalStore {
+  projects: Project[];
+  assets: Asset[];
+  access_links: (AccessLink & { project_ids: string[] })[];
+  comments: Comment[];
+  approvals: Approval[];
+}
+
+interface ProjectSettings {
+  show_progress?: boolean;
+  allow_feedback?: boolean;
+  drive_folder_id?: string | null;
+  drive_cover_file_id?: string | null;
+}
+
+function getProjectSettingsMap(): Record<string, ProjectSettings> {
+  try {
+    const p = path.join(process.cwd(), '.data', 'project-settings.json');
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, 'utf8'));
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+interface AssetDriveMapping {
+  drive_file_id?: string | null;
+  drive_folder_id?: string | null;
+  source?: 'drive' | 'legacy' | 'demo';
+}
+
+function getAssetDriveMap(): Record<string, AssetDriveMapping> {
+  try {
+    const p = path.join(process.cwd(), '.data', 'asset-drive-map.json');
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, 'utf8'));
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function removeAssetDriveMapping(assetId: string) {
+  try {
+    const dir = path.join(process.cwd(), '.data');
+    const p = path.join(dir, 'asset-drive-map.json');
+    const existing = getAssetDriveMap();
+    if (existing[assetId]) {
+      delete existing[assetId];
+      fs.writeFileSync(p, JSON.stringify(existing, null, 2), 'utf8');
+    }
+  } catch (e) {
+    console.error('Failed to remove local asset drive mapping:', e);
+  }
+}
+
+function getLinkPasswordsMap(): Record<string, string> {
+  try {
+    const p = path.join(process.cwd(), '.data', 'link-passwords.json');
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, 'utf8'));
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function saveLinkPasswordLocal(linkId: string, passwordPlain: string | null) {
+  try {
+    const dir = path.join(process.cwd(), '.data');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, 'link-passwords.json');
+    const existing = getLinkPasswordsMap();
+    if (passwordPlain === null) {
+      delete existing[linkId];
+    } else {
+      existing[linkId] = passwordPlain;
+    }
+    fs.writeFileSync(p, JSON.stringify(existing, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Failed to save local link password:', e);
+  }
+}
+
+function hydrateProjectSettings(p: any, localSettings: Record<string, ProjectSettings>): void {
+  if (!p) return;
+  const s = localSettings[p.id];
+  p.show_progress = (p.show_progress !== undefined && p.show_progress !== null)
+    ? Boolean(p.show_progress)
+    : (s?.show_progress ?? true);
+  p.allow_feedback = (p.allow_feedback !== undefined && p.allow_feedback !== null)
+    ? Boolean(p.allow_feedback)
+    : (s?.allow_feedback ?? true);
+  if (!p.drive_folder_id && s?.drive_folder_id) {
+    p.drive_folder_id = s.drive_folder_id;
+  }
+  if (!p.drive_cover_file_id && s?.drive_cover_file_id) {
+    p.drive_cover_file_id = s.drive_cover_file_id;
+  }
+}
+
+function hydrateAssetDrive(asset: any, driveMap: Record<string, AssetDriveMapping>): void {
+  if (!asset) return;
+  const m = driveMap[asset.id];
+  if (m) {
+    if (!asset.drive_file_id && m.drive_file_id) asset.drive_file_id = m.drive_file_id;
+    if (!asset.drive_folder_id && m.drive_folder_id) asset.drive_folder_id = m.drive_folder_id;
+    if ((!asset.source || asset.source === 'legacy') && m.source) asset.source = m.source;
+  }
+}
+
+const DEFAULT_SEED_DATA: LocalStore = {
+  projects: [
+    {
+      id: '00000000-0000-0000-0000-000000000001',
+      title: 'هوية القناة 2027',
+      description: 'تصميم وتطوير الهوية البصرية الشاملة للقناة التلفزيونية متضمنة الفواصل، شارة البداية، والعناصر ثلاثية الأبعاد.',
+      cover_url: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=1200&q=80',
+      category: 'هويات تلفزيونية',
+      progress: 82,
+      is_visible: true,
+      is_archived: false,
+      created_at: new Date('2026-01-10T10:00:00Z').toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000002',
+      title: 'هوية الأخبار',
+      description: 'حزمة الجرافيك الإخباري المتكامل: استوديو افتراضي، شريط الأخبار العاجلة، وقوالب المخططات البيانية المتحركة.',
+      cover_url: 'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?auto=format&fit=crop&w=1200&q=80',
+      category: 'نشرات إخبارية',
+      progress: 55,
+      is_visible: true,
+      is_archived: false,
+      created_at: new Date('2026-01-15T12:00:00Z').toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000003',
+      title: 'الملف السياسي',
+      description: 'موشن جرافيكس وهوية بصرية لبرنامج حواري سياسي أسبوعي مع مؤثرات سينمائية رقمية.',
+      cover_url: 'https://images.unsplash.com/photo-1541872703-74c5e44368f9?auto=format&fit=crop&w=1200&q=80',
+      category: 'برامج حوارية',
+      progress: 35,
+      is_visible: true,
+      is_archived: false,
+      created_at: new Date('2026-02-01T08:00:00Z').toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000004',
+      title: 'جرافيك 26 سبتمبر',
+      description: 'تغطية وطنية خاصة واحتفالية بذكرى 26 سبتمبر: شارات وثائقية وفواصل تلفزيونية مكتملة الإنتاج.',
+      cover_url: 'https://images.unsplash.com/photo-1533130061792-64b345e4a833?auto=format&fit=crop&w=1200&q=80',
+      category: 'مناسبات وطنية',
+      progress: 100,
+      is_visible: true,
+      is_archived: false,
+      created_at: new Date('2026-02-10T14:00:00Z').toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000005',
+      title: 'هوية رمضان',
+      description: 'تصاميم رمضانية بصرية أنيقة تشمل مقدمة الإفطار، فواصل الإمساكية، وتنسيقات جدول البرامج الرمضاني.',
+      cover_url: 'https://images.unsplash.com/photo-1564769625905-50e93615e769?auto=format&fit=crop&w=1200&q=80',
+      category: 'مواسم خاصة',
+      progress: 68,
+      is_visible: true,
+      is_archived: false,
+      created_at: new Date('2026-02-18T09:00:00Z').toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000006',
+      title: 'لقاء خاص',
+      description: 'هوية برنامج المقابلات الشخصية الحصري لكبار الضيوف بتدرجات داكنة وإضاءات استوديو دافئة.',
+      cover_url: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=1200&q=80',
+      category: 'مقابلات حصرية',
+      progress: 20,
+      is_visible: true,
+      is_archived: false,
+      created_at: new Date('2026-02-25T11:00:00Z').toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+  ],
+  assets: [
+    {
+      id: '10000000-0000-0000-0000-000000000001',
+      project_id: '00000000-0000-0000-0000-000000000001',
+      title: 'شارة البداية الرئيسية ثلاثية الأبعاد - Ident Main',
+      file_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      thumbnail_url: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=800&q=80',
+      file_type: 'video',
+      mime_type: 'video/mp4',
+      file_size: 42800000,
+      duration_seconds: 15,
+      version: 'V2',
+      sort_order: 1,
+      is_visible: true,
+      original_filename: 'BigBuckBunny.mp4',
+      storage_path: null,
+      created_at: new Date('2026-02-01T10:00:00Z').toISOString(),
+    },
+    {
+      id: '10000000-0000-0000-0000-000000000002',
+      project_id: '00000000-0000-0000-0000-000000000001',
+      title: 'شعار القناة ودليل الألوان والخطوط البصرية',
+      file_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1600&q=80',
+      thumbnail_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+      file_type: 'image',
+      mime_type: 'image/jpeg',
+      file_size: 3400000,
+      duration_seconds: null,
+      version: 'Final',
+      sort_order: 2,
+      is_visible: true,
+      original_filename: 'brand_guide.jpg',
+      storage_path: null,
+      created_at: new Date('2026-02-02T11:00:00Z').toISOString(),
+    },
+    {
+      id: '10000000-0000-0000-0000-000000000003',
+      project_id: '00000000-0000-0000-0000-000000000001',
+      title: 'فاصل الإعلانات الترويجي - Station Promo Bumper',
+      file_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+      thumbnail_url: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=800&q=80',
+      file_type: 'video',
+      mime_type: 'video/mp4',
+      file_size: 28400000,
+      duration_seconds: 10,
+      version: 'V1',
+      sort_order: 3,
+      is_visible: true,
+      original_filename: 'promo_bumper.mp4',
+      storage_path: null,
+      created_at: new Date('2026-02-05T13:00:00Z').toISOString(),
+    },
+    {
+      id: '10000000-0000-0000-0000-000000000004',
+      project_id: '00000000-0000-0000-0000-000000000001',
+      title: 'ملفات المشروع والطبقات المفتوحة (AE & C4D)',
+      file_url: 'https://example.com/channel-package-2027.zip',
+      thumbnail_url: 'https://images.unsplash.com/photo-1626785774573-4b799315345d?auto=format&fit=crop&w=800&q=80',
+      file_type: 'file',
+      mime_type: 'application/zip',
+      file_size: 124000000,
+      duration_seconds: null,
+      version: 'V1',
+      sort_order: 4,
+      is_visible: true,
+      original_filename: 'channel-package-2027.zip',
+      storage_path: null,
+      created_at: new Date('2026-02-06T15:00:00Z').toISOString(),
+    },
+    {
+      id: '20000000-0000-0000-0000-000000000001',
+      project_id: '00000000-0000-0000-0000-000000000002',
+      title: 'مقدمة نشرة الأخبار الرئيسية - Main News Intro',
+      file_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      thumbnail_url: 'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?auto=format&fit=crop&w=800&q=80',
+      file_type: 'video',
+      mime_type: 'video/mp4',
+      file_size: 31200000,
+      duration_seconds: 12,
+      version: 'V2',
+      sort_order: 1,
+      is_visible: true,
+      original_filename: 'news_intro.mp4',
+      storage_path: null,
+      created_at: new Date('2026-02-10T12:00:00Z').toISOString(),
+    },
+    {
+      id: '20000000-0000-0000-0000-000000000002',
+      project_id: '00000000-0000-0000-0000-000000000002',
+      title: 'شريط الأخبار والقوالب التحتية (Lower Thirds)',
+      file_url: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=1200&q=80',
+      thumbnail_url: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=800&q=80',
+      file_type: 'image',
+      mime_type: 'image/jpeg',
+      file_size: 2100000,
+      duration_seconds: null,
+      version: 'V1',
+      sort_order: 2,
+      is_visible: true,
+      original_filename: 'lower_thirds.jpg',
+      storage_path: null,
+      created_at: new Date('2026-02-12T14:00:00Z').toISOString(),
+    },
+  ],
+  access_links: [
+    {
+      id: '30000000-0000-0000-0000-000000000001',
+      viewer_name: 'أحمد',
+      slug: 'x7K29AbC',
+      password_hash: bcrypt.hashSync('2580', 10),
+      enabled: true,
+      session_version: 1,
+      created_at: new Date('2026-01-01T00:00:00Z').toISOString(),
+      project_ids: [
+        '00000000-0000-0000-0000-000000000001',
+        '00000000-0000-0000-0000-000000000002',
+        '00000000-0000-0000-0000-000000000003',
+        '00000000-0000-0000-0000-000000000004',
+        '00000000-0000-0000-0000-000000000005',
+        '00000000-0000-0000-0000-000000000006',
+      ],
+    },
+  ],
+  comments: [
+    {
+      id: '40000000-0000-0000-0000-000000000001',
+      asset_id: '10000000-0000-0000-0000-000000000001',
+      access_link_id: '30000000-0000-0000-0000-000000000001',
+      author_name: 'أحمد',
+      body: 'الشعار يحتاج تكبير قليلاً في نهاية الشارة',
+      timestamp_seconds: 7,
+      created_at: new Date('2026-02-15T10:30:00Z').toISOString(),
+    },
+    {
+      id: '40000000-0000-0000-0000-000000000002',
+      asset_id: '10000000-0000-0000-0000-000000000001',
+      access_link_id: null,
+      author_name: 'إدارة الاستوديو',
+      body: 'تم تعديل النسخة واعتماد التوقيت الجديد',
+      timestamp_seconds: null,
+      created_at: new Date('2026-02-15T11:45:00Z').toISOString(),
+    },
+  ],
+  approvals: [
+    {
+      id: '50000000-0000-0000-0000-000000000001',
+      asset_id: '10000000-0000-0000-0000-000000000002',
+      access_link_id: '30000000-0000-0000-0000-000000000001',
+      viewer_name: 'أحمد',
+      approved: true,
+      created_at: new Date('2026-02-14T09:00:00Z').toISOString(),
+      updated_at: new Date('2026-02-14T09:00:00Z').toISOString(),
+    },
+  ],
+};
+
+export function getDataMode(): 'supabase' | 'demo' {
+  const isProd = process.env.NODE_ENV === 'production';
+  const dataMode = process.env.DATA_MODE;
+
+  if (isProd) {
+    if (dataMode === 'demo' || process.env.ALLOW_DEMO === 'true') {
+      throw new Error('FATAL_CONFIG_ERROR: Demo mode is strictly forbidden in production.');
+    }
+    if (!isServerSupabaseConfigured()) {
+      throw new Error('FATAL_CONFIG_ERROR: Production environment requires valid NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
+    }
+    return 'supabase';
+  }
+
+  // Non-production: must be explicitly declared as 'demo' or 'supabase'
+  if (dataMode === 'demo') {
+    return 'demo';
+  }
+  if (dataMode === 'supabase') {
+    if (!isServerSupabaseConfigured()) {
+      throw new Error('CONFIG_ERROR: DATA_MODE is set to "supabase", but valid NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are missing.');
+    }
+    return 'supabase';
+  }
+
+  throw new Error('CONFIG_ERROR: Environment variable DATA_MODE is required and must be explicitly set to either "demo" or "supabase". Implicit demo mode is forbidden.');
+}
+
+function getLocalStore(): LocalStore {
+  const mode = getDataMode();
+  if (mode !== 'demo') {
+    throw new Error('CONFIG_ERROR: LocalStore accessed while data mode is not demo.');
+  }
+
+  if (fs.existsSync(LOCAL_STORE_FILE)) {
+    try {
+      const data = fs.readFileSync(LOCAL_STORE_FILE, 'utf-8');
+      return JSON.parse(data) as LocalStore;
+    } catch (err) {
+      // Do not silently overwrite corrupted user data
+      throw new Error(`DATA_CORRUPTION_ERROR: Failed to parse ${LOCAL_STORE_FILE}. Error: ${err}`);
+    }
+  }
+
+  // Initialize only if file does not exist
+  saveLocalStore(DEFAULT_SEED_DATA);
+  return DEFAULT_SEED_DATA;
+}
+
+function saveLocalStore(data: LocalStore): void {
+  const mode = getDataMode();
+  if (mode !== 'demo') {
+    throw new Error('CONFIG_ERROR: Attempted to write to local store while data mode is not demo.');
+  }
+
+  const dir = path.dirname(LOCAL_STORE_FILE);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(LOCAL_STORE_FILE, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+/**
+ * Resolves a secure playback/view URL for an asset:
+ * - If stored in private Supabase bucket: generates a short-lived signed URL (default 2 hours).
+ * - Never returns a raw private storage path if signing fails.
+ */
+export async function resolveAssetPlaybackUrl(
+  asset: Asset,
+  expiresInSeconds: number = 7200,
+  clientSlug?: string
+): Promise<string> {
+  const isDirectWebUrl = (url: string | null | undefined): boolean => {
+    if (!url) return false;
+    return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/uploads/');
+  };
+
+  const attachClientSlug = (url: string): string => {
+    if (!clientSlug) return url;
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/uploads/')) {
+      return url; // Preserve external URLs
+    }
+    const [p, q] = url.split('?');
+    const sp = new URLSearchParams(q || '');
+    if (!sp.has('slug')) {
+      sp.set('slug', clientSlug);
+    }
+    const qs = sp.toString();
+    return qs ? `${p}?${qs}` : p;
+  };
+
+  if (asset.storage_path || (!isDirectWebUrl(asset.file_url) && !asset.file_url?.startsWith('/api/'))) {
+    const targetPath = asset.storage_path || asset.file_url;
+    if (getDataMode() === 'supabase') {
+      const supabase = getServerSupabase();
+      if (supabase) {
+        const { data, error } = await supabase.storage
+          .from('media-studio-assets')
+          .createSignedUrl(targetPath, expiresInSeconds);
+        if (error || !data?.signedUrl) {
+          console.error(`Failed to generate signed URL for asset: ${targetPath}`, error);
+          throw new Error('SIGNING_ERROR: Failed to issue secure signed URL for private asset.');
+        }
+        return data.signedUrl;
+      }
+    }
+    // Demo proxy route
+    return attachClientSlug(`/api/media/${asset.id}`);
+  }
+
+  // Handle internal media endpoints (e.g. Drive /api/media/{id})
+  if (asset.file_url?.startsWith('/api/')) {
+    return attachClientSlug(asset.file_url);
+  }
+
+  return asset.file_url;
+}
+
+export async function resolveProjectCoverUrl(project: Project, expiresInSeconds: number = 7200): Promise<string | null> {
+  const isDirectWebUrl = (url: string | null | undefined): boolean => {
+    if (!url) return false;
+    return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/uploads/') || url.startsWith('/api/');
+  };
+
+  const targetPath = project.cover_storage_path || (!isDirectWebUrl(project.cover_url) ? project.cover_url : null);
+
+  if (targetPath) {
+    if (getDataMode() === 'supabase') {
+      const supabase = getServerSupabase();
+      if (supabase) {
+        const { data, error } = await supabase.storage
+          .from('media-studio-assets')
+          .createSignedUrl(targetPath, expiresInSeconds);
+        if (error || !data?.signedUrl) {
+          console.error(`Failed to generate signed URL for cover: ${targetPath}`, error);
+          return null;
+        }
+        return data.signedUrl;
+      }
+    }
+    // Demo mode: Return the protected proxy endpoint instead of raw storage path
+    if (project.id) {
+      return `/api/media/cover/${project.id}`;
+    }
+    return null;
+  }
+  return isDirectWebUrl(project.cover_url) ? project.cover_url! : null;
+}
+
+export async function resolveAssetThumbnailUrl(
+  asset: Asset,
+  expiresInSeconds: number = 7200,
+  clientSlug?: string
+): Promise<string | null> {
+  const isDirectWebUrl = (url: string | null | undefined): boolean => {
+    if (!url) return false;
+    return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/uploads/');
+  };
+
+  const attachClientSlug = (url: string): string => {
+    if (!clientSlug) return url;
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/uploads/')) {
+      return url; // Preserve external URLs
+    }
+    const [p, q] = url.split('?');
+    const sp = new URLSearchParams(q || '');
+    if (!sp.has('slug')) {
+      sp.set('slug', clientSlug);
+    }
+    const qs = sp.toString();
+    return qs ? `${p}?${qs}` : p;
+  };
+
+  const targetPath = asset.thumbnail_storage_path || (!isDirectWebUrl(asset.thumbnail_url) && !asset.thumbnail_url?.startsWith('/api/') ? asset.thumbnail_url : null);
+
+  if (targetPath) {
+    if (getDataMode() === 'supabase') {
+      const supabase = getServerSupabase();
+      if (supabase) {
+        const { data, error } = await supabase.storage
+          .from('media-studio-assets')
+          .createSignedUrl(targetPath, expiresInSeconds);
+        if (error || !data?.signedUrl) {
+          console.error(`Failed to generate signed URL for thumbnail: ${targetPath}`, error);
+          return null;
+        }
+        return data.signedUrl;
+      }
+    }
+    // Demo mode: Return the protected thumbnail proxy endpoint instead of raw storage path
+    if (asset.id) {
+      return attachClientSlug(`/api/media/${asset.id}?type=thumbnail`);
+    }
+    return null;
+  }
+
+  if (asset.thumbnail_url?.startsWith('/api/')) {
+    return attachClientSlug(asset.thumbnail_url);
+  }
+
+  // For any Google Drive asset (videos or images) or assets with googleusercontent URLs, route to protected thumbnail endpoint
+  if (asset.id && (asset.drive_file_id || asset.thumbnail_url?.includes('googleusercontent.com'))) {
+    return attachClientSlug(`/api/media/${asset.id}?type=thumbnail`);
+  }
+
+  return isDirectWebUrl(asset.thumbnail_url) ? asset.thumbnail_url! : null;
+}
+
+/**
+ * Unifies and synchronizes cover_url and cover_storage_path across project operations.
+ * Ensures consistent behavior when updating legacy/migrated covers or clearing covers.
+ */
+export function normalizeProjectCoverData(data: Partial<Project>): void {
+  if (data.cover_url !== undefined || data.cover_storage_path !== undefined) {
+    const rawCover = data.cover_url !== undefined ? (data.cover_url ? data.cover_url.trim() : null) : undefined;
+    const rawPath = data.cover_storage_path !== undefined ? (data.cover_storage_path ? data.cover_storage_path.trim() : null) : undefined;
+
+    const isDirectWebUrl = (u: string | null | undefined): boolean => {
+      if (!u) return false;
+      return u.startsWith('http://') || u.startsWith('https://') || u.startsWith('/uploads/');
+    };
+
+    if (rawCover === null || (rawCover === undefined && rawPath === null)) {
+      // Explicit removal: clear both fields completely
+      data.cover_url = null;
+      data.cover_storage_path = null;
+    } else if (rawPath) {
+      data.cover_storage_path = rawPath;
+      data.cover_url = rawCover || rawPath;
+    } else if (rawCover) {
+      if (isDirectWebUrl(rawCover)) {
+        data.cover_url = rawCover;
+        data.cover_storage_path = null; // Direct web URL replaces old storage path
+      } else {
+        // Relative or migrated storage path
+        data.cover_storage_path = rawCover;
+        data.cover_url = rawCover;
+      }
+    }
+  }
+}
+
+/**
+ * Deep check across assets (file and thumbnail) and projects (covers)
+ * to verify if a storage path is currently referenced in the database.
+ * Throws on DB query errors so callers can abort deletions.
+ */
+export async function isStoragePathReferenced(storagePath: string): Promise<{ referenced: boolean; reason?: string }> {
+  if (getDataMode() === 'supabase') {
+    const supabase = getServerSupabase();
+    if (!supabase) {
+      throw new Error('CONFIG_ERROR: Supabase client not available in supabase data mode.');
+    }
+
+    // 1. Check assets storage_path and file_url
+    const { count: assetCount, error: assetErr } = await supabase
+      .from('assets')
+      .select('*', { count: 'exact', head: true })
+      .or(`storage_path.eq.${storagePath},file_url.eq.${storagePath}`);
+
+    if (assetErr) {
+      throw new Error(`DB_CHECK_FAILED: Failed to check assets storage path: ${assetErr.message}`);
+    }
+    if (assetCount && assetCount > 0) {
+      return { referenced: true, reason: 'مستخدم كملف أصل رئيسي' };
+    }
+
+    // 2. Check assets thumbnail_storage_path and thumbnail_url
+    const { count: thumbCount, error: thumbErr } = await supabase
+      .from('assets')
+      .select('*', { count: 'exact', head: true })
+      .or(`thumbnail_storage_path.eq.${storagePath},thumbnail_url.eq.${storagePath}`);
+
+    if (thumbErr) {
+      throw new Error(`DB_CHECK_FAILED: Failed to check assets thumbnail path: ${thumbErr.message}`);
+    }
+    if (thumbCount && thumbCount > 0) {
+      return { referenced: true, reason: 'مستخدم كمصغر لأصل' };
+    }
+
+    // 3. Check projects cover_storage_path and cover_url
+    const { count: coverCount, error: coverErr } = await supabase
+      .from('projects')
+      .select('*', { count: 'exact', head: true })
+      .or(`cover_storage_path.eq.${storagePath},cover_url.eq.${storagePath}`);
+
+    if (coverErr) {
+      throw new Error(`DB_CHECK_FAILED: Failed to check project covers path: ${coverErr.message}`);
+    }
+    if (coverCount && coverCount > 0) {
+      return { referenced: true, reason: 'مستخدم كغلاف لمشروع' };
+    }
+
+    return { referenced: false };
+  }
+
+  // Demo mode reference check
+  const store = getLocalStore();
+  const usedInAsset = store.assets.some(
+    (a) => a.storage_path === storagePath || a.file_url === storagePath
+  );
+  if (usedInAsset) return { referenced: true, reason: 'مستخدم كملف أصل رئيسي (تجريبي)' };
+
+  const usedInThumb = store.assets.some(
+    (a) => a.thumbnail_storage_path === storagePath || a.thumbnail_url === storagePath
+  );
+  if (usedInThumb) return { referenced: true, reason: 'مستخدم كمصغر لأصل (تجريبي)' };
+
+  const usedInCover = store.projects.some(
+    (p) => p.cover_storage_path === storagePath || p.cover_url === storagePath
+  );
+  if (usedInCover) return { referenced: true, reason: 'مستخدم كغلاف لمشروع (تجريبي)' };
+
+  return { referenced: false };
+}
+
+// -------------------------------------------------------------
+// Data Access Service (Strict Single Source of Truth)
+// -------------------------------------------------------------
+
+export const dataService = {
+  // 1. Client Link Retrieval
+  async getAccessLinkBySlug(slug: string): Promise<AccessLink | null> {
+    if (getDataMode() === 'supabase') {
+      const supabase = getServerSupabase();
+      if (!supabase) {
+        throw new Error('CONFIG_ERROR: Supabase client not available in supabase data mode.');
+      }
+      const { data, error } = await supabase
+        .from('access_links')
+        .select('id, viewer_name, slug, password_hash, enabled, session_version, created_at, access_link_projects(project_id)')
+        .eq('slug', slug)
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(`DB_ERROR: Failed to fetch access link by slug: ${error.message}`);
+      }
+
+      if (!data) return null;
+
+      const hasPassword = Boolean(
+        data.password_hash &&
+        data.password_hash.trim() !== '' &&
+        data.password_hash !== 'NO_PASSWORD'
+      );
+
+      return {
+        id: data.id,
+        viewer_name: data.viewer_name,
+        slug: data.slug,
+        password_hash: '', // Omit password hash for safety when not verifying password
+        has_password: hasPassword,
+        enabled: data.enabled,
+        session_version: data.session_version ?? 1,
+        created_at: data.created_at,
+        project_ids: data.access_link_projects?.map((alp: { project_id: string }) => alp.project_id) || [],
+      };
+    }
+
+    const store = getLocalStore();
+    const link = store.access_links.find((l) => l.slug === slug);
+    if (!link) return null;
+
+    const hasPassword = Boolean(
+      link.password_hash &&
+      link.password_hash.trim() !== '' &&
+      link.password_hash !== 'NO_PASSWORD'
+    );
+
+    return {
+      id: link.id,
+      viewer_name: link.viewer_name,
+      slug: link.slug,
+      password_hash: '',
+      has_password: hasPassword,
+      enabled: link.enabled,
+      session_version: link.session_version ?? 1,
+      created_at: link.created_at,
+      project_ids: link.project_ids,
+    };
+  },
+
+  // Retrieve link with password hash strictly for authentication verification
+  async getAccessLinkAuthDataBySlug(slug: string): Promise<AccessLink | null> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('access_links')
+        .select('id, viewer_name, slug, password_hash, enabled, session_version, created_at')
+        .eq('slug', slug)
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(`DB_ERROR: Failed to fetch auth data for slug: ${error.message}`);
+      }
+      if (!data) return null;
+
+      const hasPassword = Boolean(
+        data.password_hash &&
+        data.password_hash.trim() !== '' &&
+        data.password_hash !== 'NO_PASSWORD'
+      );
+
+      return {
+        ...data,
+        has_password: hasPassword,
+      };
+    }
+
+    const store = getLocalStore();
+    const link = store.access_links.find((l) => l.slug === slug);
+    if (!link) return null;
+
+    const hasPassword = Boolean(
+      link.password_hash &&
+      link.password_hash.trim() !== '' &&
+      link.password_hash !== 'NO_PASSWORD'
+    );
+
+    return {
+      id: link.id,
+      viewer_name: link.viewer_name,
+      slug: link.slug,
+      password_hash: link.password_hash,
+      enabled: link.enabled,
+      session_version: link.session_version ?? 1,
+      created_at: link.created_at,
+      has_password: hasPassword,
+    };
+  },
+
+  // 2. Client Projects List
+  async getProjectsForClient(linkId: string): Promise<Project[]> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      const { data: linkProjects, error: linkErr } = await supabase
+        .from('access_link_projects')
+        .select('project_id')
+        .eq('access_link_id', linkId);
+
+      if (linkErr) {
+        throw new Error(`DB_ERROR: Failed to fetch link projects: ${linkErr.message}`);
+      }
+
+      const projectIds = linkProjects?.map((lp) => lp.project_id) || [];
+      if (projectIds.length === 0) return [];
+
+      const { data: projects, error: projErr } = await supabase
+        .from('projects')
+        .select('*, assets(count)')
+        .in('id', projectIds)
+        .eq('is_visible', true)
+        .eq('is_archived', false)
+        .order('created_at', { ascending: false });
+
+      if (projErr) {
+        throw new Error(`DB_ERROR: Failed to fetch assigned projects: ${projErr.message}`);
+      }
+
+      const localSettings = getProjectSettingsMap();
+      const mapped = (projects || []).map((p) => {
+        hydrateProjectSettings(p, localSettings);
+        return {
+          ...p,
+          file_count: p.assets?.[0]?.count || 0,
+        };
+      });
+
+      for (const p of mapped) {
+        p.display_cover_url = await resolveProjectCoverUrl(p);
+      }
+
+      return mapped;
+    }
+
+    const store = getLocalStore();
+    const link = store.access_links.find((l) => l.id === linkId);
+    if (!link) return [];
+
+    return store.projects
+      .filter((p) => link.project_ids.includes(p.id) && p.is_visible && !p.is_archived)
+      .map((p) => ({
+        ...p,
+        show_progress: p.show_progress ?? true,
+        allow_feedback: p.allow_feedback ?? true,
+        display_cover_url: p.cover_url,
+        file_count: store.assets.filter((a) => a.project_id === p.id && a.is_visible).length,
+      }));
+  },
+
+  // 3. Client Single Project Access Check
+  async getProjectForClient(linkId: string, projectId: string): Promise<Project | null> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      const { data: linkProj, error: linkErr } = await supabase
+        .from('access_link_projects')
+        .select('project_id')
+        .eq('access_link_id', linkId)
+        .eq('project_id', projectId)
+        .maybeSingle();
+
+      if (linkErr) {
+        throw new Error(`DB_ERROR: Failed to check project assignment: ${linkErr.message}`);
+      }
+      if (!linkProj) return null;
+
+      const { data: project, error: projErr } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('id', projectId)
+        .eq('is_visible', true)
+        .eq('is_archived', false)
+        .maybeSingle();
+
+      if (projErr) {
+        throw new Error(`DB_ERROR: Failed to fetch project: ${projErr.message}`);
+      }
+      if (!project) return null;
+
+      const localSettings = getProjectSettingsMap();
+      hydrateProjectSettings(project, localSettings);
+      project.display_cover_url = await resolveProjectCoverUrl(project);
+      return project;
+    }
+
+    const store = getLocalStore();
+    const link = store.access_links.find((l) => l.id === linkId);
+    if (!link || !link.project_ids.includes(projectId)) return null;
+
+    const project = store.projects.find((p) => p.id === projectId && p.is_visible && !p.is_archived);
+    if (!project) return null;
+    return {
+      ...project,
+      show_progress: project.show_progress ?? true,
+      allow_feedback: project.allow_feedback ?? true,
+      display_cover_url: project.cover_url,
+    };
+  },
+
+  // 4. Project Assets (with ephemeral signed URLs, approvals and comments)
+  async getAssetsForProject(
+    projectId: string,
+    forClient: boolean = true,
+    clientSlug?: string
+  ): Promise<Asset[]> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      let query = supabase
+        .from('assets')
+        .select('*, approvals(*), comments(*)')
+        .eq('project_id', projectId)
+        .order('sort_order', { ascending: true });
+
+      if (forClient) {
+        query = query.eq('is_visible', true);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        throw new Error(`DB_ERROR: Failed to fetch assets for project: ${error.message}`);
+      }
+
+      const assets = (data || []) as Asset[];
+      const driveMap = getAssetDriveMap();
+
+      // Resolve ephemeral signed URLs for playback and thumbnail preview
+      for (const asset of assets) {
+        hydrateAssetDrive(asset, driveMap);
+        asset.playback_url = await resolveAssetPlaybackUrl(asset, 7200, clientSlug);
+        asset.display_thumbnail_url = await resolveAssetThumbnailUrl(asset, 7200, clientSlug);
+      }
+
+      return assets;
+    }
+
+    const store = getLocalStore();
+    return store.assets
+      .filter((a) => a.project_id === projectId && (!forClient || a.is_visible))
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((a) => {
+        const attachSlug = (url: string | null | undefined): string | null => {
+          if (!url) return null;
+          if (clientSlug && url.startsWith('/api/')) {
+            const [p, q] = url.split('?');
+            const sp = new URLSearchParams(q || '');
+            if (!sp.has('slug')) sp.set('slug', clientSlug);
+            const str = sp.toString();
+            return str ? `${p}?${str}` : p;
+          }
+          return url;
+        };
+        return {
+          ...a,
+          playback_url: attachSlug(a.file_url) || a.file_url,
+          display_thumbnail_url: attachSlug(a.thumbnail_url) || a.thumbnail_url,
+          approvals: store.approvals.filter((app) => app.asset_id === a.id),
+          comments: store.comments
+            .filter((c) => c.asset_id === a.id)
+            .sort((x, y) => new Date(x.created_at).getTime() - new Date(y.created_at).getTime()),
+        };
+      });
+  },
+
+  // 5. Get Single Asset by ID
+  async getAssetById(assetId: string): Promise<Asset | null> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('assets')
+        .select('*')
+        .eq('id', assetId)
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(`DB_ERROR: Failed to fetch asset by ID: ${error.message}`);
+      }
+      if (!data) return null;
+
+      const asset = data as Asset;
+      const driveMap = getAssetDriveMap();
+      hydrateAssetDrive(asset, driveMap);
+      asset.playback_url = await resolveAssetPlaybackUrl(asset);
+      asset.display_thumbnail_url = await resolveAssetThumbnailUrl(asset);
+      return asset;
+    }
+
+    const store = getLocalStore();
+    const asset = store.assets.find((a) => a.id === assetId);
+    if (!asset) return null;
+    return { ...asset, playback_url: asset.file_url, display_thumbnail_url: asset.thumbnail_url };
+  },
+
+  // 6. Add Comment
+  async addComment(
+    assetId: string,
+    accessLinkId: string | null,
+    authorName: string,
+    body: string,
+    timestampSeconds?: number | null
+  ): Promise<Comment> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('comments')
+        .insert({
+          asset_id: assetId,
+          access_link_id: accessLinkId,
+          author_name: authorName,
+          body,
+          timestamp_seconds: timestampSeconds ?? null,
+        })
+        .select()
+        .single();
+
+      if (error || !data) {
+        throw new Error(`DB_ERROR: Failed to insert comment: ${error?.message}`);
+      }
+      return data as Comment;
+    }
+
+    const store = getLocalStore();
+    const newComment: Comment = {
+      id: crypto.randomUUID(),
+      asset_id: assetId,
+      access_link_id: accessLinkId,
+      author_name: authorName,
+      body,
+      timestamp_seconds: timestampSeconds ?? null,
+      created_at: new Date().toISOString(),
+    };
+    store.comments.push(newComment);
+    saveLocalStore(store);
+    return newComment;
+  },
+
+  // 7. Toggle Approval (Keyed on asset_id + access_link_id)
+  async toggleApproval(
+    assetId: string,
+    accessLinkId: string | null,
+    viewerName: string,
+    approved: boolean
+  ): Promise<Approval> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      if (!accessLinkId) {
+        throw new Error('VALIDATION_ERROR: accessLinkId is required to record approval.');
+      }
+
+      // Upsert keyed on (asset_id, access_link_id)
+      const { data, error } = await supabase
+        .from('approvals')
+        .upsert(
+          {
+            asset_id: assetId,
+            access_link_id: accessLinkId,
+            viewer_name: viewerName,
+            approved,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'asset_id,access_link_id' }
+        )
+        .select()
+        .single();
+
+      if (error || !data) {
+        throw new Error(`DB_ERROR: Failed to update approval: ${error?.message}`);
+      }
+      return data as Approval;
+    }
+
+    const store = getLocalStore();
+    const existingIndex = store.approvals.findIndex(
+      (a) => a.asset_id === assetId && a.access_link_id === accessLinkId
+    );
+
+    let result: Approval;
+    if (existingIndex >= 0) {
+      store.approvals[existingIndex].approved = approved;
+      store.approvals[existingIndex].viewer_name = viewerName; // update display name snapshot
+      store.approvals[existingIndex].updated_at = new Date().toISOString();
+      result = store.approvals[existingIndex];
+    } else {
+      result = {
+        id: crypto.randomUUID(),
+        asset_id: assetId,
+        access_link_id: accessLinkId,
+        viewer_name: viewerName,
+        approved,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      store.approvals.push(result);
+    }
+    saveLocalStore(store);
+    return result;
+  },
+
+  // -------------------------------------------------------------
+  // Admin Project Management
+  // -------------------------------------------------------------
+
+  async getAllProjects(): Promise<Project[]> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('projects')
+        .select(`
+          *,
+          assets (
+            id,
+            comments (id),
+            approvals (id, approved)
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw new Error(`DB_ERROR: Failed to fetch all projects: ${error.message}`);
+      }
+
+      const localSettings = getProjectSettingsMap();
+      const mapped = (data || []).map((p: any) => {
+        hydrateProjectSettings(p, localSettings);
+        const assetsList = p.assets || [];
+        const fileCount = assetsList.length;
+        const commentsCount = assetsList.reduce((sum: number, a: any) => sum + (a.comments?.length || 0), 0);
+        const approvalsCount = assetsList.reduce(
+          (sum: number, a: any) => sum + (a.approvals?.filter((app: any) => app.approved)?.length || 0),
+          0
+        );
+
+        return {
+          ...p,
+          file_count: fileCount,
+          comments_count: commentsCount,
+          approvals_count: approvalsCount,
+        };
+      });
+
+      for (const p of mapped) {
+        p.display_cover_url = await resolveProjectCoverUrl(p);
+      }
+
+      return mapped;
+    }
+
+    const store = getLocalStore();
+    return store.projects.map((p) => {
+      const projAssets = store.assets.filter((a) => a.project_id === p.id);
+      const commentsCount = projAssets.reduce((sum, a) => sum + (a.comments?.length || 0), 0);
+      const approvalsCount = projAssets.reduce(
+        (sum, a) => sum + (a.approvals?.filter((app) => app.approved)?.length || 0),
+        0
+      );
+
+      return {
+        ...p,
+        show_progress: p.show_progress ?? true,
+        allow_feedback: p.allow_feedback ?? true,
+        display_cover_url: p.cover_url,
+        file_count: projAssets.length,
+        comments_count: commentsCount,
+        approvals_count: approvalsCount,
+      };
+    });
+  },
+
+  async getRecentStudioNotifications(limit: number = 30): Promise<StudioNotification[]> {
+    if (getDataMode() === 'supabase') {
+      const supabase = getServerSupabase();
+      if (!supabase) return [];
+
+      // 1. Fetch recent comments
+      const { data: commentsData } = await supabase
+        .from('comments')
+        .select(`
+          id,
+          body,
+          author_name,
+          timestamp_seconds,
+          created_at,
+          asset_id,
+          assets (
+            id,
+            title,
+            thumbnail_url,
+            file_type,
+            file_url,
+            project_id,
+            projects (
+              id,
+              title,
+              cover_url
+            )
+          )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      // 2. Fetch recent approvals (where approved = true)
+      const { data: approvalsData } = await supabase
+        .from('approvals')
+        .select(`
+          id,
+          viewer_name,
+          approved,
+          created_at,
+          updated_at,
+          asset_id,
+          assets (
+            id,
+            title,
+            thumbnail_url,
+            file_type,
+            file_url,
+            project_id,
+            projects (
+              id,
+              title,
+              cover_url
+            )
+          )
+        `)
+        .eq('approved', true)
+        .order('updated_at', { ascending: false })
+        .limit(limit);
+
+      const notifications: StudioNotification[] = [];
+
+      for (const c of commentsData || []) {
+        const asset = (c.assets as any);
+        const project = (asset?.projects as any);
+        if (asset && project) {
+          const thumbUrl = (asset.thumbnail_url?.includes('googleusercontent.com') || asset.file_url?.includes('/api/media/'))
+            ? `/api/media/${asset.id}?type=thumbnail`
+            : (asset.thumbnail_url || (asset.file_type === 'image' ? asset.file_url : null));
+
+          notifications.push({
+            id: `comment_${c.id}`,
+            type: 'comment',
+            project_id: project.id,
+            project_title: project.title,
+            project_cover_url: project.cover_url || null,
+            asset_id: asset.id,
+            asset_title: asset.title,
+            asset_thumbnail_url: thumbUrl,
+            client_name: c.author_name || 'عميل',
+            content: c.body,
+            timestamp_seconds: c.timestamp_seconds ?? null,
+            created_at: c.created_at,
+          });
+        }
+      }
+
+      for (const a of approvalsData || []) {
+        const asset = (a.assets as any);
+        const project = (asset?.projects as any);
+        if (asset && project) {
+          const thumbUrl = (asset.thumbnail_url?.includes('googleusercontent.com') || asset.file_url?.includes('/api/media/'))
+            ? `/api/media/${asset.id}?type=thumbnail`
+            : (asset.thumbnail_url || (asset.file_type === 'image' ? asset.file_url : null));
+
+          notifications.push({
+            id: `approval_${a.id}`,
+            type: 'approval',
+            project_id: project.id,
+            project_title: project.title,
+            project_cover_url: project.cover_url || null,
+            asset_id: asset.id,
+            asset_title: asset.title,
+            asset_thumbnail_url: thumbUrl,
+            client_name: a.viewer_name || 'عميل',
+            content: 'تم اعتماد هذا الملف بنجاح',
+            timestamp_seconds: null,
+            created_at: a.updated_at || a.created_at,
+          });
+        }
+      }
+
+      // Resolve display cover URLs for notifications
+      for (const n of notifications) {
+        if (n.project_cover_url && !n.project_cover_url.startsWith('http')) {
+          n.project_cover_url = await resolveProjectCoverUrl({ id: n.project_id, cover_url: n.project_cover_url } as Project);
+        }
+      }
+
+      notifications.sort((x, y) => new Date(y.created_at).getTime() - new Date(x.created_at).getTime());
+      return notifications.slice(0, limit);
+    }
+
+    // Demo Mode
+    const store = getLocalStore();
+    const notifications: StudioNotification[] = [];
+
+    for (const asset of store.assets) {
+      const project = store.projects.find((p) => p.id === asset.project_id);
+      if (!project) continue;
+
+      for (const c of asset.comments || []) {
+        notifications.push({
+          id: `comment_${c.id}`,
+          type: 'comment',
+          project_id: project.id,
+          project_title: project.title,
+          project_cover_url: project.cover_url,
+          asset_id: asset.id,
+          asset_title: asset.title,
+          asset_thumbnail_url: asset.thumbnail_url || asset.file_url,
+          client_name: c.author_name,
+          content: c.body,
+          timestamp_seconds: c.timestamp_seconds,
+          created_at: c.created_at,
+        });
+      }
+
+      for (const app of asset.approvals || []) {
+        if (!app.approved) continue;
+        notifications.push({
+          id: `approval_${app.id}`,
+          type: 'approval',
+          project_id: project.id,
+          project_title: project.title,
+          project_cover_url: project.cover_url,
+          asset_id: asset.id,
+          asset_title: asset.title,
+          asset_thumbnail_url: asset.thumbnail_url || asset.file_url,
+          client_name: app.viewer_name,
+          content: 'تم اعتماد هذا الملف بنجاح',
+          timestamp_seconds: null,
+          created_at: app.updated_at || app.created_at,
+        });
+      }
+    }
+
+    notifications.sort((x, y) => new Date(y.created_at).getTime() - new Date(x.created_at).getTime());
+    return notifications.slice(0, limit);
+  },
+
+  async getProjectById(id: string): Promise<Project | null> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      const { data, error } = await supabase.from('projects').select('*').eq('id', id).maybeSingle();
+      if (error) {
+        throw new Error(`DB_ERROR: Failed to fetch project ${id}: ${error.message}`);
+      }
+      if (!data) return null;
+      const proj = data as Project;
+      const localSettings = getProjectSettingsMap();
+      hydrateProjectSettings(proj, localSettings);
+      proj.display_cover_url = await resolveProjectCoverUrl(proj);
+      return proj;
+    }
+
+    const store = getLocalStore();
+    const found = store.projects.find((p) => p.id === id);
+    if (!found) return null;
+    return {
+      ...found,
+      show_progress: found.show_progress ?? true,
+      allow_feedback: found.allow_feedback ?? true,
+      display_cover_url: found.cover_url,
+    };
+  },
+
+  async createProject(data: Partial<Project>): Promise<Project> {
+    normalizeProjectCoverData(data);
+    const showProgress = data.show_progress !== undefined ? Boolean(data.show_progress) : true;
+    const allowFeedback = data.allow_feedback !== undefined ? Boolean(data.allow_feedback) : true;
+
+    if (getDataMode() === 'supabase') {
+      const supabase = getServerSupabase();
+      if (!supabase) {
+        throw new Error('CONFIG_ERROR: Supabase client not available in supabase data mode.');
+      }
+
+      const insertPayload: Record<string, any> = {
+        title: data.title || 'مشروع جديد',
+        description: data.description || null,
+        cover_url: data.cover_url ?? null,
+        cover_storage_path: data.cover_storage_path ?? null,
+        category: data.category || null,
+        progress: Math.min(100, Math.max(0, Number(data.progress || 0))),
+        show_progress: showProgress,
+        allow_feedback: allowFeedback,
+        is_visible: data.is_visible ?? true,
+        is_archived: data.is_archived ?? false,
+      };
+      if (data.id) insertPayload.id = data.id;
+
+      let created: any = null;
+      const { data: resData, error: resErr } = await supabase
+        .from('projects')
+        .insert(insertPayload)
+        .select()
+        .single();
+
+      if (resErr) {
+        const isMissingCol =
+          resErr.code === '42703' ||
+          resErr.code === 'PGRST204' ||
+          resErr.message?.includes('schema cache') ||
+          resErr.message?.includes('column');
+
+        if (isMissingCol) {
+          throw new Error(
+            `DB_SCHEMA_ERROR: فشل إنشاء المشروع بسبب نقص في أعمدة قاعدة البيانات (${resErr.message}). يرجى التأكد من تطبيق ترحيلات Supabase حتى 007.`
+          );
+        }
+        throw new Error(`DB_ERROR: Failed to create project: ${resErr?.message}`);
+      }
+      created = resData;
+
+      const localSettings = getProjectSettingsMap();
+      hydrateProjectSettings(created, localSettings);
+      return created;
+    }
+
+    const store = getLocalStore();
+    const newProj: Project = {
+      id: data.id || crypto.randomUUID(),
+      title: data.title || 'مشروع جديد',
+      description: data.description || null,
+      cover_url: data.cover_url ?? null,
+      cover_storage_path: data.cover_storage_path ?? null,
+      drive_folder_id: data.drive_folder_id ?? null,
+      drive_cover_file_id: data.drive_cover_file_id ?? null,
+      category: data.category || null,
+      progress: Math.min(100, Math.max(0, Number(data.progress || 0))),
+      show_progress: showProgress,
+      allow_feedback: allowFeedback,
+      is_visible: data.is_visible ?? true,
+      is_archived: data.is_archived ?? false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      file_count: 0,
+    };
+    store.projects.unshift(newProj);
+    saveLocalStore(store);
+    return newProj;
+  },
+
+  async updateProject(id: string, data: Partial<Project>): Promise<Project | null> {
+    normalizeProjectCoverData(data);
+
+    if (getDataMode() === 'supabase') {
+      const supabase = getServerSupabase();
+      if (!supabase) {
+        throw new Error('CONFIG_ERROR: Supabase client not available in supabase data mode.');
+      }
+
+      const updatePayload: Record<string, any> = {
+        ...data,
+        updated_at: new Date().toISOString(),
+      };
+      if (data.cover_url !== undefined) updatePayload.cover_url = data.cover_url;
+      if (data.cover_storage_path !== undefined) updatePayload.cover_storage_path = data.cover_storage_path;
+
+      let updated: any = null;
+      const { data: resData, error: resErr } = await supabase
+        .from('projects')
+        .update(updatePayload)
+        .eq('id', id)
+        .select()
+        .maybeSingle();
+
+      if (resErr) {
+        const isMissingCol =
+          resErr.code === '42703' ||
+          resErr.code === 'PGRST204' ||
+          resErr.message?.includes('schema cache') ||
+          resErr.message?.includes('column');
+
+        if (isMissingCol) {
+          throw new Error(
+            `DB_SCHEMA_ERROR: فشل تحديث المشروع بسبب نقص في أعمدة قاعدة البيانات (${resErr.message}). يرجى التأكد من تطبيق ترحيلات Supabase حتى 007.`
+          );
+        }
+        throw new Error(`DB_ERROR: Failed to update project: ${resErr.message}`);
+      }
+      updated = resData;
+
+      if (!updated) return null;
+
+      const localMap = getProjectSettingsMap();
+      hydrateProjectSettings(updated, localMap);
+      return updated;
+    }
+
+    const store = getLocalStore();
+    const idx = store.projects.findIndex((p) => p.id === id);
+    if (idx < 0) return null;
+
+    store.projects[idx] = {
+      ...store.projects[idx],
+      ...data,
+      allow_feedback: data.allow_feedback !== undefined ? Boolean(data.allow_feedback) : (store.projects[idx].allow_feedback ?? true),
+      updated_at: new Date().toISOString(),
+    };
+    saveLocalStore(store);
+    return store.projects[idx];
+  },
+
+  async deleteProject(id: string): Promise<boolean> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      // 1. Fetch project cover and verify query success
+      const { data: project, error: projErr } = await supabase
+        .from('projects')
+        .select('cover_storage_path, cover_url')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (projErr) {
+        throw new Error(`DB_ERROR: Failed to fetch project prior to deletion: ${projErr.message}`);
+      }
+      if (!project) {
+        return false;
+      }
+
+      // Fetch assets' storage paths and verify query success
+      const { data: assets, error: assetsErr } = await supabase
+        .from('assets')
+        .select('storage_path, thumbnail_storage_path, thumbnail_url')
+        .eq('project_id', id);
+
+      if (assetsErr) {
+        throw new Error(`DB_ERROR: Failed to fetch project assets prior to deletion: ${assetsErr.message}`);
+      }
+
+      const pathsToDelete: string[] = [];
+      if (project.cover_storage_path) {
+        pathsToDelete.push(project.cover_storage_path);
+      } else if (
+        project.cover_url &&
+        !project.cover_url.startsWith('http://') &&
+        !project.cover_url.startsWith('https://') &&
+        !project.cover_url.startsWith('/uploads/')
+      ) {
+        pathsToDelete.push(project.cover_url);
+      }
+
+      (assets || []).forEach((a) => {
+        if (a.storage_path) pathsToDelete.push(a.storage_path);
+        if (a.thumbnail_storage_path) pathsToDelete.push(a.thumbnail_storage_path);
+        else if (
+          a.thumbnail_url &&
+          !a.thumbnail_url.startsWith('http://') &&
+          !a.thumbnail_url.startsWith('https://') &&
+          !a.thumbnail_url.startsWith('/uploads/')
+        ) {
+          pathsToDelete.push(a.thumbnail_url);
+        }
+      });
+
+      // 2. Delete project from DB (cascades to assets, comments, approvals)
+      const { error: delErr } = await supabase.from('projects').delete().eq('id', id);
+      if (delErr) {
+        throw new Error(`DB_ERROR: Failed to delete project: ${delErr.message}`);
+      }
+
+      // 3. Remove storage files and verify error
+      if (pathsToDelete.length > 0) {
+        const { error: storageErr } = await supabase.storage
+          .from('media-studio-assets')
+          .remove(pathsToDelete);
+
+        if (storageErr) {
+          console.error('Storage deletion failed for deleted project, logging cleanup:', storageErr);
+          const cleanupEntries = pathsToDelete.map((sp) => ({
+            storage_path: sp,
+            bucket_id: 'media-studio-assets',
+            reason: `project_deleted_${id}`,
+            last_error: storageErr.message,
+            attempts: 1,
+            updated_at: new Date().toISOString(),
+          }));
+
+          const { error: logErr } = await supabase
+            .from('pending_storage_cleanups')
+            .upsert(cleanupEntries, { onConflict: 'bucket_id,storage_path' });
+
+          if (logErr) {
+            console.error('Failed to log pending storage cleanup:', logErr);
+            throw new Error('PARTIAL_DELETION: Project records deleted, but storage cleanup failed and queueing failed.');
+          }
+        }
+      }
+
+      return true;
+    }
+
+    const store = getLocalStore();
+    store.projects = store.projects.filter((p) => p.id !== id);
+    store.assets = store.assets.filter((a) => a.project_id !== id);
+    store.access_links.forEach((link) => {
+      link.project_ids = (link.project_ids || []).filter((pId) => pId !== id);
+    });
+    saveLocalStore(store);
+    return true;
+  },
+
+  // -------------------------------------------------------------
+  // Admin Asset Management
+  // -------------------------------------------------------------
+
+  async getAssetByDriveFileId(driveFileId: string): Promise<Asset | null> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('assets')
+          .select('*')
+          .eq('drive_file_id', driveFileId)
+          .maybeSingle();
+
+        if (!error && data) {
+          const driveMap = getAssetDriveMap();
+          hydrateAssetDrive(data, driveMap);
+          return data;
+        }
+        if (error && error.code !== '42703' && error.code !== 'PGRST204' && !error.message?.includes('drive_file_id') && !error.message?.includes('schema cache')) {
+          throw new Error(`DB_ERROR: Failed to fetch asset by Drive file ID: ${error.message}`);
+        }
+      } catch (e: any) {
+        if (!e.message?.includes('drive_file_id') && !e.message?.includes('schema cache')) {
+          throw e;
+        }
+      }
+
+      // Check local drive map fallback
+      const driveMap = getAssetDriveMap();
+      for (const [assetId, map] of Object.entries(driveMap)) {
+        if (map.drive_file_id === driveFileId) {
+          const asset = await this.getAssetById(assetId);
+          if (asset) return asset;
+        }
+      }
+      return null;
+    }
+
+    const store = getLocalStore();
+    return store.assets.find((a) => a.drive_file_id === driveFileId) || null;
+  },
+
+  async createAsset(data: Partial<Asset>): Promise<Asset> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      const payload: Record<string, unknown> = {
+        project_id: data.project_id,
+        title: data.title || 'ملف جديد',
+        file_url: data.file_url,
+        thumbnail_url: data.thumbnail_url || null,
+        thumbnail_storage_path: data.thumbnail_storage_path || null,
+        file_type: data.file_type || 'file',
+        mime_type: data.mime_type || null,
+        file_size: data.file_size || null,
+        duration_seconds: data.duration_seconds || null,
+        version: data.version || 'V1',
+        sort_order: data.sort_order || 0,
+        is_visible: data.is_visible ?? true,
+        original_filename: data.original_filename || null,
+        storage_path: data.storage_path || null,
+        drive_file_id: data.drive_file_id || null,
+        drive_folder_id: data.drive_folder_id || null,
+        source: data.source || (data.drive_file_id ? 'drive' : (data.storage_path ? 'legacy' : 'demo')),
+      };
+      if (data.id) {
+        payload.id = data.id;
+      }
+
+      let created: any = null;
+      const { data: resCreated, error } = await supabase
+        .from('assets')
+        .insert(payload)
+        .select()
+        .single();
+
+      if (error) {
+        if (data.drive_file_id && (error.code === '23505' || error.message.includes('unique_assets_drive_file_id'))) {
+          const existing = await this.getAssetByDriveFileId(data.drive_file_id);
+          if (existing) return existing;
+        }
+
+        const isMissingCol =
+          error.code === '42703' ||
+          error.code === 'PGRST204' ||
+          error.message?.includes('schema cache') ||
+          error.message?.includes('column') ||
+          error.message?.includes('drive_file_id') ||
+          error.message?.includes('drive_folder_id') ||
+          error.message?.includes('source');
+
+        if (isMissingCol) {
+          throw new Error(
+            `DB_SCHEMA_ERROR: فشل إدراج الملف بسبب نقص في أعمدة قاعدة البيانات (${error.message}). يرجى التأكد من تطبيق ترحيلات Supabase حتى 007.`
+          );
+        }
+        throw new Error(`DB_ERROR: Failed to insert asset: ${error.message}`);
+      }
+      created = resCreated;
+
+      if (!created) {
+        throw new Error('DB_ERROR: Failed to insert asset: No record returned');
+      }
+
+      const driveMap = getAssetDriveMap();
+      hydrateAssetDrive(created, driveMap);
+      return created;
+    }
+
+    const store = getLocalStore();
+    if (data.drive_file_id) {
+      const existing = store.assets.find((a) => a.drive_file_id === data.drive_file_id);
+      if (existing) return existing;
+    }
+    const newAsset: Asset = {
+      id: data.id || crypto.randomUUID(),
+      project_id: data.project_id!,
+      title: data.title || 'ملف جديد',
+      file_url: data.file_url!,
+      thumbnail_url: data.thumbnail_url || null,
+      thumbnail_storage_path: data.thumbnail_storage_path || null,
+      file_type: data.file_type || 'file',
+      mime_type: data.mime_type || null,
+      file_size: data.file_size || null,
+      duration_seconds: data.duration_seconds || null,
+      version: data.version || 'V1',
+      sort_order: data.sort_order ?? store.assets.filter((a) => a.project_id === data.project_id).length + 1,
+      is_visible: data.is_visible ?? true,
+      original_filename: data.original_filename || null,
+      storage_path: data.storage_path || null,
+      drive_file_id: data.drive_file_id || null,
+      drive_folder_id: data.drive_folder_id || null,
+      source: data.source || (data.drive_file_id ? 'drive' : (data.storage_path ? 'legacy' : 'demo')),
+      created_at: new Date().toISOString(),
+    };
+    store.assets.push(newAsset);
+    saveLocalStore(store);
+    return newAsset;
+  },
+
+  async updateAsset(id: string, data: Partial<Asset>): Promise<Asset | null> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      const updatePayload: Record<string, any> = { ...data };
+      let updated: any = null;
+      const { data: resUpdated, error } = await supabase
+        .from('assets')
+        .update(updatePayload)
+        .eq('id', id)
+        .select()
+        .maybeSingle();
+
+      if (error) {
+        const isMissingCol =
+          error.code === '42703' ||
+          error.code === 'PGRST204' ||
+          error.message?.includes('schema cache') ||
+          error.message?.includes('column');
+
+        if (isMissingCol) {
+          throw new Error(
+            `DB_SCHEMA_ERROR: فشل تحديث الملف بسبب نقص في أعمدة قاعدة البيانات (${error.message}). يرجى التأكد من تطبيق ترحيلات Supabase حتى 007.`
+          );
+        }
+        throw new Error(`DB_ERROR: Failed to update asset: ${error.message}`);
+      }
+      updated = resUpdated;
+
+      if (!updated) return null;
+      const driveMap = getAssetDriveMap();
+      hydrateAssetDrive(updated, driveMap);
+      return updated;
+    }
+
+    const store = getLocalStore();
+    const idx = store.assets.findIndex((a) => a.id === id);
+    if (idx < 0) return null;
+
+    store.assets[idx] = {
+      ...store.assets[idx],
+      ...data,
+    };
+    saveLocalStore(store);
+    return store.assets[idx];
+  },
+
+  async deleteAsset(id: string): Promise<boolean> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      // 1. Fetch asset to delete storage object
+      const { data: asset, error: fetchErr } = await supabase
+        .from('assets')
+        .select('storage_path, thumbnail_storage_path, thumbnail_url')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (fetchErr) {
+        throw new Error(`DB_ERROR: Failed to fetch asset for deletion: ${fetchErr.message}`);
+      }
+      if (!asset) {
+        return false;
+      }
+
+      const pathsToDelete: string[] = [];
+      if (asset.storage_path) pathsToDelete.push(asset.storage_path);
+      if (asset.thumbnail_storage_path) {
+        pathsToDelete.push(asset.thumbnail_storage_path);
+      } else if (
+        asset.thumbnail_url &&
+        !asset.thumbnail_url.startsWith('http://') &&
+        !asset.thumbnail_url.startsWith('https://') &&
+        !asset.thumbnail_url.startsWith('/uploads/')
+      ) {
+        pathsToDelete.push(asset.thumbnail_url);
+      }
+
+      // 2. Delete database record
+      const { error: delErr } = await supabase.from('assets').delete().eq('id', id);
+      if (delErr) {
+        throw new Error(`DB_ERROR: Failed to delete asset: ${delErr.message}`);
+      }
+
+      // 3. Remove storage objects and check error
+      if (pathsToDelete.length > 0) {
+        const { error: storageErr } = await supabase.storage
+          .from('media-studio-assets')
+          .remove(pathsToDelete);
+
+        if (storageErr) {
+          console.error('Storage deletion failed for deleted asset, logging cleanup:', storageErr);
+          const cleanupEntries = pathsToDelete.map((sp) => ({
+            storage_path: sp,
+            bucket_id: 'media-studio-assets',
+            reason: `asset_deleted_${id}`,
+            last_error: storageErr.message,
+            attempts: 1,
+            updated_at: new Date().toISOString(),
+          }));
+
+          const { error: logErr } = await supabase
+            .from('pending_storage_cleanups')
+            .upsert(cleanupEntries, { onConflict: 'bucket_id,storage_path' });
+
+          if (logErr) {
+            console.error('Failed to log pending storage cleanup:', logErr);
+            throw new Error('PARTIAL_DELETION: Asset database record deleted, but storage cleanup failed and queueing failed.');
+          }
+        }
+      }
+
+      removeAssetDriveMapping(id);
+      return true;
+    }
+
+    const store = getLocalStore();
+    store.assets = store.assets.filter((a) => a.id !== id);
+    store.comments = store.comments.filter((c) => c.asset_id !== id);
+    store.approvals = store.approvals.filter((app) => app.asset_id !== id);
+    saveLocalStore(store);
+    removeAssetDriveMapping(id);
+    return true;
+  },
+
+  async reorderAssets(orderedIds: string[]): Promise<boolean> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      for (let i = 0; i < orderedIds.length; i++) {
+        const { error } = await supabase.from('assets').update({ sort_order: i + 1 }).eq('id', orderedIds[i]);
+        if (error) {
+          throw new Error(`DB_ERROR: Failed to reorder asset ${orderedIds[i]}: ${error.message}`);
+        }
+      }
+      return true;
+    }
+
+    const store = getLocalStore();
+    orderedIds.forEach((id, index) => {
+      const asset = store.assets.find((a) => a.id === id);
+      if (asset) asset.sort_order = index + 1;
+    });
+    saveLocalStore(store);
+    return true;
+  },
+
+  // -------------------------------------------------------------
+  // Admin Client Access Link Management
+  // -------------------------------------------------------------
+
+  async getAllAccessLinks(): Promise<(AccessLink & { project_ids: string[] })[]> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      let { data, error } = await supabase
+        .from('access_links')
+        .select('id, viewer_name, slug, password_hash, password_plain, enabled, session_version, created_at, access_link_projects(project_id)')
+        .order('created_at', { ascending: false });
+
+      // Fallback if password_plain column is not yet present on remote DB
+      if (error && (error.code === '42703' || error.message?.includes('password_plain') || error.message?.includes('schema cache'))) {
+        const fallbackRes = await supabase
+          .from('access_links')
+          .select('id, viewer_name, slug, password_hash, enabled, session_version, created_at, access_link_projects(project_id)')
+          .order('created_at', { ascending: false });
+        data = fallbackRes.data as any;
+        error = fallbackRes.error;
+      }
+
+      if (error) {
+        throw new Error(`DB_ERROR: Failed to fetch access links: ${error.message}`);
+      }
+
+      const localPasswords = getLinkPasswordsMap();
+      return (data || []).map((link: any) => ({
+        id: link.id,
+        viewer_name: link.viewer_name,
+        slug: link.slug,
+        password_hash: '', // Never leak password hash to admin view
+        password_plain: link.password_plain || localPasswords[link.id] || null,
+        has_password: Boolean(link.password_hash && link.password_hash.trim() !== '' && link.password_hash !== 'NO_PASSWORD'),
+        enabled: link.enabled,
+        session_version: link.session_version ?? 1,
+        created_at: link.created_at,
+        project_ids: link.access_link_projects?.map((alp: { project_id: string }) => alp.project_id) || [],
+      }));
+    }
+
+    const store = getLocalStore();
+    return store.access_links.map((l) => ({
+      ...l,
+      password_hash: '', // Never leak password hash
+      password_plain: l.password_plain || null,
+      has_password: Boolean(l.password_hash && l.password_hash.trim() !== '' && l.password_hash !== 'NO_PASSWORD'),
+    }));
+  },
+
+  async createAccessLink(viewerName: string, passwordPlain: string, projectIds: string[]): Promise<AccessLink> {
+    const slug = generateSlug(8);
+    const hasPassword = Boolean(passwordPlain && passwordPlain.trim() !== '');
+    const cleanPassword = hasPassword ? passwordPlain.trim() : null;
+    const passwordHash = hasPassword ? await bcrypt.hash(cleanPassword!, 10) : '';
+
+    const supabase = getServerSupabase();
+    if (supabase) {
+      const insertPayload: Record<string, unknown> = {
+        viewer_name: viewerName,
+        slug,
+        password_hash: passwordHash,
+        password_plain: cleanPassword,
+        enabled: true,
+        session_version: 1,
+      };
+
+      let { data: link, error } = await supabase
+        .from('access_links')
+        .insert(insertPayload)
+        .select('id, viewer_name, slug, enabled, session_version, created_at')
+        .single();
+
+      // Graceful fallback if password_plain column is not yet applied on remote DB
+      if (error && (error.code === '42703' || error.message?.includes('password_plain') || error.message?.includes('schema cache'))) {
+        delete insertPayload.password_plain;
+        const retryRes = await supabase
+          .from('access_links')
+          .insert(insertPayload)
+          .select('id, viewer_name, slug, enabled, session_version, created_at')
+          .single();
+        link = retryRes.data;
+        error = retryRes.error;
+      }
+
+      if (error || !link) {
+        throw new Error(`DB_ERROR: Failed to create access link: ${error?.message}`);
+      }
+
+      if (projectIds.length > 0) {
+        const insertData = projectIds.map((pId) => ({
+          access_link_id: link.id,
+          project_id: pId,
+        }));
+        const { error: assignErr } = await supabase.from('access_link_projects').insert(insertData);
+        if (assignErr) {
+          // Rollback link creation to avoid orphan empty link
+          await supabase.from('access_links').delete().eq('id', link.id);
+          throw new Error(`DB_ERROR: Failed to assign projects to new link: ${assignErr.message}`);
+        }
+      }
+
+      if (cleanPassword) {
+        saveLinkPasswordLocal(link.id, cleanPassword);
+      }
+
+      return {
+        ...link,
+        password_hash: '',
+        password_plain: cleanPassword,
+        has_password: hasPassword,
+        project_ids: projectIds,
+      };
+    }
+
+    const store = getLocalStore();
+    const newLink: AccessLink & { project_ids: string[] } = {
+      id: crypto.randomUUID(),
+      viewer_name: viewerName,
+      slug,
+      password_hash: passwordHash,
+      password_plain: cleanPassword,
+      enabled: true,
+      session_version: 1,
+      created_at: new Date().toISOString(),
+      project_ids: projectIds,
+    };
+    store.access_links.unshift(newLink);
+    saveLocalStore(store);
+
+    return {
+      ...newLink,
+      password_hash: '',
+      password_plain: cleanPassword,
+      has_password: hasPassword,
+    };
+  },
+
+  async updateAccessLink(
+    id: string,
+    data: { viewerName?: string; passwordPlain?: string; projectIds?: string[]; enabled?: boolean; removePassword?: boolean }
+  ): Promise<boolean> {
+    const supabase = getServerSupabase();
+    if (supabase) {
+      let passwordHash: string | null = null;
+      let incrementSessionVersion = false;
+
+      if (data.removePassword) {
+        passwordHash = '';
+        incrementSessionVersion = true;
+      } else if (data.passwordPlain && data.passwordPlain.trim() !== '') {
+        passwordHash = await bcrypt.hash(data.passwordPlain.trim(), 10);
+        incrementSessionVersion = true;
+      }
+
+      // Execute strictly through atomic stored procedure (no unsafe manual rollbacks)
+      const { error: rpcErr } = await supabase.rpc('update_access_link_atomic', {
+        p_link_id: id,
+        p_viewer_name: data.viewerName ?? null,
+        p_password_hash: passwordHash,
+        p_enabled: data.enabled ?? null,
+        p_increment_session_version: incrementSessionVersion,
+        p_project_ids: data.projectIds ?? null,
+      });
+
+      if (rpcErr) {
+        throw new Error(`ATOMIC_UPDATE_FAILED: Stored procedure update_access_link_atomic failed: ${rpcErr.message}`);
+      }
+
+      // Update password_plain safely (ignoring if column doesn't exist on remote DB yet)
+      try {
+        if (data.removePassword) {
+          saveLinkPasswordLocal(id, null);
+          const { error: plainErr } = await supabase.from('access_links').update({ password_plain: null }).eq('id', id);
+          if (plainErr && plainErr.code !== '42703' && !plainErr.message?.includes('password_plain')) {
+            console.warn('Could not clear password_plain:', plainErr.message);
+          }
+        } else if (data.passwordPlain && data.passwordPlain.trim() !== '') {
+          saveLinkPasswordLocal(id, data.passwordPlain.trim());
+          const { error: plainErr } = await supabase.from('access_links').update({ password_plain: data.passwordPlain.trim() }).eq('id', id);
+          if (plainErr && plainErr.code !== '42703' && !plainErr.message?.includes('password_plain')) {
+            console.warn('Could not update password_plain:', plainErr.message);
+          }
+        }
+      } catch (colErr) {
+        console.warn('Could not update password_plain (likely column not yet applied on remote DB):', colErr);
+      }
+
+      return true;
+    }
+
+    // Local Demo: Atomic clone-and-swap
+    const store = getLocalStore();
+    const idx = store.access_links.findIndex((l) => l.id === id);
+    if (idx < 0) return false;
+
+    const backup = JSON.parse(JSON.stringify(store)) as LocalStore;
+
+    try {
+      const link = store.access_links[idx];
+      if (data.viewerName !== undefined) link.viewer_name = data.viewerName;
+      if (data.enabled !== undefined) link.enabled = data.enabled;
+      if (data.removePassword) {
+        link.password_hash = '';
+        link.password_plain = null;
+        saveLinkPasswordLocal(id, null);
+        link.session_version = (link.session_version ?? 1) + 1;
+      } else if (data.passwordPlain && data.passwordPlain.trim() !== '') {
+        link.password_hash = await bcrypt.hash(data.passwordPlain.trim(), 10);
+        link.password_plain = data.passwordPlain.trim();
+        saveLinkPasswordLocal(id, data.passwordPlain.trim());
+        link.session_version = (link.session_version ?? 1) + 1;
+      }
+      if (data.projectIds) {
+        // Enforce referential integrity: every assigned project must exist
+        for (const pId of data.projectIds) {
+          if (!store.projects.some((p) => p.id === pId)) {
+            throw new Error(`ATOMIC_UPDATE_FAILED: Referenced project '${pId}' does not exist.`);
+          }
+        }
+        link.project_ids = [...data.projectIds];
+      }
+      saveLocalStore(store);
+      return true;
+    } catch (err) {
+      saveLocalStore(backup);
+      throw err;
+    }
+  },
+
+  async deleteAccessLink(id: string): Promise<boolean> {
+    saveLinkPasswordLocal(id, null);
+    const supabase = getServerSupabase();
+    if (supabase) {
+      const { error } = await supabase.from('access_links').delete().eq('id', id);
+      if (error) {
+        throw new Error(`DB_ERROR: Failed to delete access link: ${error.message}`);
+      }
+      return true;
+    }
+
+    const store = getLocalStore();
+    store.access_links = store.access_links.filter((l) => l.id !== id);
+    saveLocalStore(store);
+    return true;
+  },
+};

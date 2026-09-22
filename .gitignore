@@ -1,0 +1,64 @@
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# Production / Next.js
+/.next/
+/out/
+/build
+/dist
+
+# Secret files & Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+*.env.*
+!.env.example
+
+# Local server storage & token persistence
+/.data/
+/.data/*
+/.data/**
+google-drive.json
+
+# Keys and certificates
+*.pem
+*.key
+*.cert
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# OS / Editor
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.idea/
+.vscode/
+
+# Media binaries & Large files
+*.mp4
+*.mov
+*.webm
+*.avi
+*.mkv
+*.zip
+*.tar.gz
+
+# Temporary test profiles and cookies
+.chrome-temp-*
+cookies.txt
+*.tsbuildinfo
+supabase/.temp/
+
+
