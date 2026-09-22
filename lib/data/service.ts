@@ -1,5 +1,5 @@
 import 'server-only';
-import { getServerSupabase, isServerSupabaseConfigured, reportSupabaseFailure, reportSupabaseSuccess } from '@/lib/supabase/server';
+import { getServerSupabase, isServerSupabaseConfigured, isSupabaseHealthy, reportSupabaseFailure, reportSupabaseSuccess } from '@/lib/supabase/server';
 import { Project, Asset, AccessLink, Comment, Approval, StudioNotification } from '@/lib/supabase/database.types';
 import bcrypt from 'bcryptjs';
 import { generateSlug } from '@/lib/utils/slug';
@@ -427,11 +427,10 @@ const DEFAULT_SEED_DATA: LocalStore = {
 };
 
 export function getDataMode(): 'supabase' | 'demo' {
-  const isProd = process.env.NODE_ENV === 'production';
   const dataMode = process.env.DATA_MODE;
 
-  // 1. If Supabase is fully configured and ready, use Supabase
-  if (isServerSupabaseConfigured()) {
+  // 1. If Supabase is fully configured and healthy, use Supabase
+  if (isServerSupabaseConfigured() && isSupabaseHealthy()) {
     return 'supabase';
   }
 
@@ -440,26 +439,7 @@ export function getDataMode(): 'supabase' | 'demo' {
     return 'demo';
   }
 
-  // 3. In production:
-  if (isProd) {
-    // If user explicitly configured DATA_MODE=supabase but keys are missing
-    if (dataMode === 'supabase') {
-      throw new Error('CONFIG_ERROR: DATA_MODE is set to "supabase", but valid NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are missing.');
-    }
-    // Otherwise, when deployed on Vercel without Supabase keys, gracefully run in demo mode
-    // so the portfolio showcase and admin dashboard operate smoothly instead of crashing with a 500 error!
-    return 'demo';
-  }
-
-  // 4. Non-production:
-  if (dataMode === 'supabase') {
-    if (!isServerSupabaseConfigured()) {
-      throw new Error('CONFIG_ERROR: DATA_MODE is set to "supabase", but valid NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are missing.');
-    }
-    return 'supabase';
-  }
-
-  // Default to demo mode for local development and testing
+  // 3. Fallback gracefully to demo / local store so outages or unresolvable hosts never crash admin or client
   return 'demo';
 }
 
@@ -740,50 +720,44 @@ export function normalizeProjectCoverData(data: Partial<Project>): void {
 export async function isStoragePathReferenced(storagePath: string): Promise<{ referenced: boolean; reason?: string }> {
   if (getDataMode() === 'supabase') {
     const supabase = getServerSupabase();
-    if (!supabase) {
-      throw new Error('CONFIG_ERROR: Supabase client not available in supabase data mode.');
-    }
+    if (supabase) {
+      try {
+        // 1. Check assets storage_path and file_url
+        const { count: assetCount, error: assetErr } = await supabase
+          .from('assets')
+          .select('*', { count: 'exact', head: true })
+          .or(`storage_path.eq.${storagePath},file_url.eq.${storagePath}`);
 
-    // 1. Check assets storage_path and file_url
-    const { count: assetCount, error: assetErr } = await supabase
-      .from('assets')
-      .select('*', { count: 'exact', head: true })
-      .or(`storage_path.eq.${storagePath},file_url.eq.${storagePath}`);
+        if (!assetErr && assetCount && assetCount > 0) {
+          return { referenced: true, reason: 'مستخدم كملف أصل رئيسي' };
+        }
 
-    if (assetErr) {
-      throw new Error(`DB_CHECK_FAILED: Failed to check assets storage path: ${assetErr.message}`);
-    }
-    if (assetCount && assetCount > 0) {
-      return { referenced: true, reason: 'مستخدم كملف أصل رئيسي' };
-    }
+        // 2. Check assets thumbnail_storage_path and thumbnail_url
+        const { count: thumbCount, error: thumbErr } = await supabase
+          .from('assets')
+          .select('*', { count: 'exact', head: true })
+          .or(`thumbnail_storage_path.eq.${storagePath},thumbnail_url.eq.${storagePath}`);
 
-    // 2. Check assets thumbnail_storage_path and thumbnail_url
-    const { count: thumbCount, error: thumbErr } = await supabase
-      .from('assets')
-      .select('*', { count: 'exact', head: true })
-      .or(`thumbnail_storage_path.eq.${storagePath},thumbnail_url.eq.${storagePath}`);
+        if (!thumbErr && thumbCount && thumbCount > 0) {
+          return { referenced: true, reason: 'مستخدم كمصغر لأصل' };
+        }
 
-    if (thumbErr) {
-      throw new Error(`DB_CHECK_FAILED: Failed to check assets thumbnail path: ${thumbErr.message}`);
-    }
-    if (thumbCount && thumbCount > 0) {
-      return { referenced: true, reason: 'مستخدم كمصغر لأصل' };
-    }
+        // 3. Check projects cover_storage_path and cover_url
+        const { count: coverCount, error: coverErr } = await supabase
+          .from('projects')
+          .select('*', { count: 'exact', head: true })
+          .or(`cover_storage_path.eq.${storagePath},cover_url.eq.${storagePath}`);
 
-    // 3. Check projects cover_storage_path and cover_url
-    const { count: coverCount, error: coverErr } = await supabase
-      .from('projects')
-      .select('*', { count: 'exact', head: true })
-      .or(`cover_storage_path.eq.${storagePath},cover_url.eq.${storagePath}`);
+        if (!coverErr && coverCount && coverCount > 0) {
+          return { referenced: true, reason: 'مستخدم كغلاف لمشروع' };
+        }
 
-    if (coverErr) {
-      throw new Error(`DB_CHECK_FAILED: Failed to check project covers path: ${coverErr.message}`);
+        return { referenced: false };
+      } catch (err: any) {
+        reportSupabaseFailure(err);
+        console.warn('isStoragePathReferenced Supabase check failed, falling back to local check:', err?.message || err);
+      }
     }
-    if (coverCount && coverCount > 0) {
-      return { referenced: true, reason: 'مستخدم كغلاف لمشروع' };
-    }
-
-    return { referenced: false };
   }
 
   // Demo mode reference check
@@ -1587,50 +1561,42 @@ export const dataService = {
 
     if (getDataMode() === 'supabase') {
       const supabase = getServerSupabase();
-      if (!supabase) {
-        throw new Error('CONFIG_ERROR: Supabase client not available in supabase data mode.');
-      }
+      if (supabase) {
+        try {
+          const insertPayload: Record<string, any> = {
+            title: data.title || 'مشروع جديد',
+            description: data.description || null,
+            cover_url: data.cover_url ?? null,
+            cover_storage_path: data.cover_storage_path ?? null,
+            category: data.category || null,
+            progress: Math.min(100, Math.max(0, Number(data.progress || 0))),
+            show_progress: showProgress,
+            allow_feedback: allowFeedback,
+            is_visible: data.is_visible ?? true,
+            is_archived: data.is_archived ?? false,
+          };
+          if (data.id) insertPayload.id = data.id;
 
-      const insertPayload: Record<string, any> = {
-        title: data.title || 'مشروع جديد',
-        description: data.description || null,
-        cover_url: data.cover_url ?? null,
-        cover_storage_path: data.cover_storage_path ?? null,
-        category: data.category || null,
-        progress: Math.min(100, Math.max(0, Number(data.progress || 0))),
-        show_progress: showProgress,
-        allow_feedback: allowFeedback,
-        is_visible: data.is_visible ?? true,
-        is_archived: data.is_archived ?? false,
-      };
-      if (data.id) insertPayload.id = data.id;
+          const { data: resData, error: resErr } = await supabase
+            .from('projects')
+            .insert(insertPayload)
+            .select()
+            .single();
 
-      let created: any = null;
-      const { data: resData, error: resErr } = await supabase
-        .from('projects')
-        .insert(insertPayload)
-        .select()
-        .single();
-
-      if (resErr) {
-        const isMissingCol =
-          resErr.code === '42703' ||
-          resErr.code === 'PGRST204' ||
-          resErr.message?.includes('schema cache') ||
-          resErr.message?.includes('column');
-
-        if (isMissingCol) {
-          throw new Error(
-            `DB_SCHEMA_ERROR: فشل إنشاء المشروع بسبب نقص في أعمدة قاعدة البيانات (${resErr.message}). يرجى التأكد من تطبيق ترحيلات Supabase حتى 007.`
-          );
+          if (!resErr && resData) {
+            reportSupabaseSuccess();
+            const localSettings = getProjectSettingsMap();
+            hydrateProjectSettings(resData, localSettings);
+            return resData;
+          } else if (resErr) {
+            reportSupabaseFailure(resErr);
+            console.warn('[Supabase Warning] createProject failed, falling back to local store:', resErr.message);
+          }
+        } catch (err: any) {
+          reportSupabaseFailure(err);
+          console.warn('[Supabase Exception] createProject failed, falling back to local store:', err?.message || err);
         }
-        throw new Error(`DB_ERROR: Failed to create project: ${resErr?.message}`);
       }
-      created = resData;
-
-      const localSettings = getProjectSettingsMap();
-      hydrateProjectSettings(created, localSettings);
-      return created;
     }
 
     const store = getLocalStore();
@@ -1662,46 +1628,36 @@ export const dataService = {
 
     if (getDataMode() === 'supabase') {
       const supabase = getServerSupabase();
-      if (!supabase) {
-        throw new Error('CONFIG_ERROR: Supabase client not available in supabase data mode.');
-      }
+      if (supabase) {
+        try {
+          const updatePayload: Record<string, any> = {
+            ...data,
+            updated_at: new Date().toISOString(),
+          };
+          if (data.cover_url !== undefined) updatePayload.cover_url = data.cover_url;
+          if (data.cover_storage_path !== undefined) updatePayload.cover_storage_path = data.cover_storage_path;
 
-      const updatePayload: Record<string, any> = {
-        ...data,
-        updated_at: new Date().toISOString(),
-      };
-      if (data.cover_url !== undefined) updatePayload.cover_url = data.cover_url;
-      if (data.cover_storage_path !== undefined) updatePayload.cover_storage_path = data.cover_storage_path;
+          const { data: resData, error: resErr } = await supabase
+            .from('projects')
+            .update(updatePayload)
+            .eq('id', id)
+            .select()
+            .maybeSingle();
 
-      let updated: any = null;
-      const { data: resData, error: resErr } = await supabase
-        .from('projects')
-        .update(updatePayload)
-        .eq('id', id)
-        .select()
-        .maybeSingle();
-
-      if (resErr) {
-        const isMissingCol =
-          resErr.code === '42703' ||
-          resErr.code === 'PGRST204' ||
-          resErr.message?.includes('schema cache') ||
-          resErr.message?.includes('column');
-
-        if (isMissingCol) {
-          throw new Error(
-            `DB_SCHEMA_ERROR: فشل تحديث المشروع بسبب نقص في أعمدة قاعدة البيانات (${resErr.message}). يرجى التأكد من تطبيق ترحيلات Supabase حتى 007.`
-          );
+          if (!resErr && resData) {
+            reportSupabaseSuccess();
+            const localMap = getProjectSettingsMap();
+            hydrateProjectSettings(resData, localMap);
+            return resData;
+          } else if (resErr) {
+            reportSupabaseFailure(resErr);
+            console.warn('[Supabase Warning] updateProject failed, falling back to local store:', resErr.message);
+          }
+        } catch (err: any) {
+          reportSupabaseFailure(err);
+          console.warn('[Supabase Exception] updateProject failed, falling back to local store:', err?.message || err);
         }
-        throw new Error(`DB_ERROR: Failed to update project: ${resErr.message}`);
       }
-      updated = resData;
-
-      if (!updated) return null;
-
-      const localMap = getProjectSettingsMap();
-      hydrateProjectSettings(updated, localMap);
-      return updated;
     }
 
     const store = getLocalStore();
@@ -1721,90 +1677,51 @@ export const dataService = {
   async deleteProject(id: string): Promise<boolean> {
     const supabase = getServerSupabase();
     if (supabase) {
-      // 1. Fetch project cover and verify query success
-      const { data: project, error: projErr } = await supabase
-        .from('projects')
-        .select('cover_storage_path, cover_url')
-        .eq('id', id)
-        .maybeSingle();
+      try {
+        const { data: project } = await supabase
+          .from('projects')
+          .select('cover_storage_path, cover_url')
+          .eq('id', id)
+          .maybeSingle();
 
-      if (projErr) {
-        throw new Error(`DB_ERROR: Failed to fetch project prior to deletion: ${projErr.message}`);
-      }
-      if (!project) {
-        return false;
-      }
+        const { data: assets } = await supabase
+          .from('assets')
+          .select('storage_path, thumbnail_storage_path, thumbnail_url')
+          .eq('project_id', id);
 
-      // Fetch assets' storage paths and verify query success
-      const { data: assets, error: assetsErr } = await supabase
-        .from('assets')
-        .select('storage_path, thumbnail_storage_path, thumbnail_url')
-        .eq('project_id', id);
-
-      if (assetsErr) {
-        throw new Error(`DB_ERROR: Failed to fetch project assets prior to deletion: ${assetsErr.message}`);
-      }
-
-      const pathsToDelete: string[] = [];
-      if (project.cover_storage_path) {
-        pathsToDelete.push(project.cover_storage_path);
-      } else if (
-        project.cover_url &&
-        !project.cover_url.startsWith('http://') &&
-        !project.cover_url.startsWith('https://') &&
-        !project.cover_url.startsWith('/uploads/')
-      ) {
-        pathsToDelete.push(project.cover_url);
-      }
-
-      (assets || []).forEach((a) => {
-        if (a.storage_path) pathsToDelete.push(a.storage_path);
-        if (a.thumbnail_storage_path) pathsToDelete.push(a.thumbnail_storage_path);
-        else if (
-          a.thumbnail_url &&
-          !a.thumbnail_url.startsWith('http://') &&
-          !a.thumbnail_url.startsWith('https://') &&
-          !a.thumbnail_url.startsWith('/uploads/')
-        ) {
-          pathsToDelete.push(a.thumbnail_url);
-        }
-      });
-
-      // 2. Delete project from DB (cascades to assets, comments, approvals)
-      const { error: delErr } = await supabase.from('projects').delete().eq('id', id);
-      if (delErr) {
-        throw new Error(`DB_ERROR: Failed to delete project: ${delErr.message}`);
-      }
-
-      // 3. Remove storage files and verify error
-      if (pathsToDelete.length > 0) {
-        const { error: storageErr } = await supabase.storage
-          .from('media-studio-assets')
-          .remove(pathsToDelete);
-
-        if (storageErr) {
-          console.error('Storage deletion failed for deleted project, logging cleanup:', storageErr);
-          const cleanupEntries = pathsToDelete.map((sp) => ({
-            storage_path: sp,
-            bucket_id: 'media-studio-assets',
-            reason: `project_deleted_${id}`,
-            last_error: storageErr.message,
-            attempts: 1,
-            updated_at: new Date().toISOString(),
-          }));
-
-          const { error: logErr } = await supabase
-            .from('pending_storage_cleanups')
-            .upsert(cleanupEntries, { onConflict: 'bucket_id,storage_path' });
-
-          if (logErr) {
-            console.error('Failed to log pending storage cleanup:', logErr);
-            throw new Error('PARTIAL_DELETION: Project records deleted, but storage cleanup failed and queueing failed.');
+        const pathsToDelete: string[] = [];
+        if (project?.cover_storage_path) pathsToDelete.push(project.cover_storage_path);
+        if (assets) {
+          for (const a of assets) {
+            if (a.storage_path) pathsToDelete.push(a.storage_path);
+            if (a.thumbnail_storage_path) pathsToDelete.push(a.thumbnail_storage_path);
           }
         }
-      }
 
-      return true;
+        if (pathsToDelete.length > 0) {
+          try {
+            await supabase.storage.from('media-studio-assets').remove(pathsToDelete);
+          } catch {
+            // ignore
+          }
+        }
+
+        const { error: delErr } = await supabase.from('projects').delete().eq('id', id);
+        if (!delErr) {
+          reportSupabaseSuccess();
+          const store = getLocalStore();
+          store.projects = store.projects.filter((p) => p.id !== id);
+          store.assets = store.assets.filter((a) => a.project_id !== id);
+          saveLocalStore(store);
+          return true;
+        } else {
+          reportSupabaseFailure(delErr);
+          console.warn('[Supabase Warning] deleteProject failed:', delErr.message);
+        }
+      } catch (err: any) {
+        reportSupabaseFailure(err);
+        console.warn('[Supabase Exception] deleteProject:', err?.message || err);
+      }
     }
 
     const store = getLocalStore();
@@ -1863,67 +1780,49 @@ export const dataService = {
   async createAsset(data: Partial<Asset>): Promise<Asset> {
     const supabase = getServerSupabase();
     if (supabase) {
-      const payload: Record<string, unknown> = {
-        project_id: data.project_id,
-        title: data.title || 'ملف جديد',
-        file_url: data.file_url,
-        thumbnail_url: data.thumbnail_url || null,
-        thumbnail_storage_path: data.thumbnail_storage_path || null,
-        file_type: data.file_type || 'file',
-        mime_type: data.mime_type || null,
-        file_size: data.file_size || null,
-        duration_seconds: data.duration_seconds || null,
-        version: data.version || 'V1',
-        sort_order: data.sort_order || 0,
-        is_visible: data.is_visible ?? true,
-        original_filename: data.original_filename || null,
-        storage_path: data.storage_path || null,
-        drive_file_id: data.drive_file_id || null,
-        drive_folder_id: data.drive_folder_id || null,
-        source: data.source || (data.drive_file_id ? 'drive' : (data.storage_path ? 'legacy' : 'demo')),
-      };
-      if (data.id) {
-        payload.id = data.id;
-      }
-
-      let created: any = null;
-      const { data: resCreated, error } = await supabase
-        .from('assets')
-        .insert(payload)
-        .select()
-        .single();
-
-      if (error) {
-        if (data.drive_file_id && (error.code === '23505' || error.message.includes('unique_assets_drive_file_id'))) {
-          const existing = await this.getAssetByDriveFileId(data.drive_file_id);
-          if (existing) return existing;
+      try {
+        const payload: Record<string, unknown> = {
+          project_id: data.project_id,
+          title: data.title || 'ملف جديد',
+          file_url: data.file_url,
+          thumbnail_url: data.thumbnail_url || null,
+          thumbnail_storage_path: data.thumbnail_storage_path || null,
+          file_type: data.file_type || 'file',
+          mime_type: data.mime_type || null,
+          file_size: data.file_size || null,
+          duration_seconds: data.duration_seconds || null,
+          version: data.version || 'V1',
+          sort_order: data.sort_order || 0,
+          is_visible: data.is_visible ?? true,
+          original_filename: data.original_filename || null,
+          storage_path: data.storage_path || null,
+          drive_file_id: data.drive_file_id || null,
+          drive_folder_id: data.drive_folder_id || null,
+          source: data.source || (data.drive_file_id ? 'drive' : (data.storage_path ? 'legacy' : 'demo')),
+        };
+        if (data.id) {
+          payload.id = data.id;
         }
 
-        const isMissingCol =
-          error.code === '42703' ||
-          error.code === 'PGRST204' ||
-          error.message?.includes('schema cache') ||
-          error.message?.includes('column') ||
-          error.message?.includes('drive_file_id') ||
-          error.message?.includes('drive_folder_id') ||
-          error.message?.includes('source');
+        const { data: resCreated, error } = await supabase
+          .from('assets')
+          .insert(payload)
+          .select()
+          .single();
 
-        if (isMissingCol) {
-          throw new Error(
-            `DB_SCHEMA_ERROR: فشل إدراج الملف بسبب نقص في أعمدة قاعدة البيانات (${error.message}). يرجى التأكد من تطبيق ترحيلات Supabase حتى 007.`
-          );
+        if (!error && resCreated) {
+          reportSupabaseSuccess();
+          const driveMap = getAssetDriveMap();
+          hydrateAssetDrive(resCreated, driveMap);
+          return resCreated as Asset;
+        } else if (error) {
+          reportSupabaseFailure(error);
+          console.warn('[Supabase Warning] createAsset failed, falling back to local store:', error.message);
         }
-        throw new Error(`DB_ERROR: Failed to insert asset: ${error.message}`);
+      } catch (err: any) {
+        reportSupabaseFailure(err);
+        console.warn('[Supabase Exception] createAsset failed, falling back to local store:', err?.message || err);
       }
-      created = resCreated;
-
-      if (!created) {
-        throw new Error('DB_ERROR: Failed to insert asset: No record returned');
-      }
-
-      const driveMap = getAssetDriveMap();
-      hydrateAssetDrive(created, driveMap);
-      return created;
     }
 
     const store = getLocalStore();
@@ -1960,35 +1859,28 @@ export const dataService = {
   async updateAsset(id: string, data: Partial<Asset>): Promise<Asset | null> {
     const supabase = getServerSupabase();
     if (supabase) {
-      const updatePayload: Record<string, any> = { ...data };
-      let updated: any = null;
-      const { data: resUpdated, error } = await supabase
-        .from('assets')
-        .update(updatePayload)
-        .eq('id', id)
-        .select()
-        .maybeSingle();
+      try {
+        const updatePayload: Record<string, any> = { ...data };
+        const { data: resUpdated, error } = await supabase
+          .from('assets')
+          .update(updatePayload)
+          .eq('id', id)
+          .select()
+          .maybeSingle();
 
-      if (error) {
-        const isMissingCol =
-          error.code === '42703' ||
-          error.code === 'PGRST204' ||
-          error.message?.includes('schema cache') ||
-          error.message?.includes('column');
-
-        if (isMissingCol) {
-          throw new Error(
-            `DB_SCHEMA_ERROR: فشل تحديث الملف بسبب نقص في أعمدة قاعدة البيانات (${error.message}). يرجى التأكد من تطبيق ترحيلات Supabase حتى 007.`
-          );
+        if (!error && resUpdated) {
+          reportSupabaseSuccess();
+          const driveMap = getAssetDriveMap();
+          hydrateAssetDrive(resUpdated, driveMap);
+          return resUpdated as Asset;
+        } else if (error) {
+          reportSupabaseFailure(error);
+          console.warn('[Supabase Warning] updateAsset failed, falling back to local store:', error.message);
         }
-        throw new Error(`DB_ERROR: Failed to update asset: ${error.message}`);
+      } catch (err: any) {
+        reportSupabaseFailure(err);
+        console.warn('[Supabase Exception] updateAsset failed, falling back to local store:', err?.message || err);
       }
-      updated = resUpdated;
-
-      if (!updated) return null;
-      const driveMap = getAssetDriveMap();
-      hydrateAssetDrive(updated, driveMap);
-      return updated;
     }
 
     const store = getLocalStore();
@@ -2006,69 +1898,44 @@ export const dataService = {
   async deleteAsset(id: string): Promise<boolean> {
     const supabase = getServerSupabase();
     if (supabase) {
-      // 1. Fetch asset to delete storage object
-      const { data: asset, error: fetchErr } = await supabase
-        .from('assets')
-        .select('storage_path, thumbnail_storage_path, thumbnail_url')
-        .eq('id', id)
-        .maybeSingle();
+      try {
+        const { data: asset } = await supabase
+          .from('assets')
+          .select('storage_path, thumbnail_storage_path, thumbnail_url')
+          .eq('id', id)
+          .maybeSingle();
 
-      if (fetchErr) {
-        throw new Error(`DB_ERROR: Failed to fetch asset for deletion: ${fetchErr.message}`);
-      }
-      if (!asset) {
-        return false;
-      }
-
-      const pathsToDelete: string[] = [];
-      if (asset.storage_path) pathsToDelete.push(asset.storage_path);
-      if (asset.thumbnail_storage_path) {
-        pathsToDelete.push(asset.thumbnail_storage_path);
-      } else if (
-        asset.thumbnail_url &&
-        !asset.thumbnail_url.startsWith('http://') &&
-        !asset.thumbnail_url.startsWith('https://') &&
-        !asset.thumbnail_url.startsWith('/uploads/')
-      ) {
-        pathsToDelete.push(asset.thumbnail_url);
-      }
-
-      // 2. Delete database record
-      const { error: delErr } = await supabase.from('assets').delete().eq('id', id);
-      if (delErr) {
-        throw new Error(`DB_ERROR: Failed to delete asset: ${delErr.message}`);
-      }
-
-      // 3. Remove storage objects and check error
-      if (pathsToDelete.length > 0) {
-        const { error: storageErr } = await supabase.storage
-          .from('media-studio-assets')
-          .remove(pathsToDelete);
-
-        if (storageErr) {
-          console.error('Storage deletion failed for deleted asset, logging cleanup:', storageErr);
-          const cleanupEntries = pathsToDelete.map((sp) => ({
-            storage_path: sp,
-            bucket_id: 'media-studio-assets',
-            reason: `asset_deleted_${id}`,
-            last_error: storageErr.message,
-            attempts: 1,
-            updated_at: new Date().toISOString(),
-          }));
-
-          const { error: logErr } = await supabase
-            .from('pending_storage_cleanups')
-            .upsert(cleanupEntries, { onConflict: 'bucket_id,storage_path' });
-
-          if (logErr) {
-            console.error('Failed to log pending storage cleanup:', logErr);
-            throw new Error('PARTIAL_DELETION: Asset database record deleted, but storage cleanup failed and queueing failed.');
+        if (asset) {
+          const pathsToDelete: string[] = [];
+          if (asset.storage_path) pathsToDelete.push(asset.storage_path);
+          if (asset.thumbnail_storage_path) pathsToDelete.push(asset.thumbnail_storage_path);
+          if (pathsToDelete.length > 0) {
+            try {
+              await supabase.storage.from('media-studio-assets').remove(pathsToDelete);
+            } catch {
+              // ignore
+            }
           }
         }
-      }
 
-      removeAssetDriveMapping(id);
-      return true;
+        const { error: delErr } = await supabase.from('assets').delete().eq('id', id);
+        if (!delErr) {
+          reportSupabaseSuccess();
+          const store = getLocalStore();
+          store.assets = store.assets.filter((a) => a.id !== id);
+          store.comments = store.comments.filter((c) => c.asset_id !== id);
+          store.approvals = store.approvals.filter((app) => app.asset_id !== id);
+          saveLocalStore(store);
+          removeAssetDriveMapping(id);
+          return true;
+        } else {
+          reportSupabaseFailure(delErr);
+          console.warn('[Supabase Warning] deleteAsset failed:', delErr.message);
+        }
+      } catch (err: any) {
+        reportSupabaseFailure(err);
+        console.warn('[Supabase Exception] deleteAsset:', err?.message || err);
+      }
     }
 
     const store = getLocalStore();
@@ -2083,20 +1950,23 @@ export const dataService = {
   async reorderAssets(orderedIds: string[]): Promise<boolean> {
     const supabase = getServerSupabase();
     if (supabase) {
-      for (let i = 0; i < orderedIds.length; i++) {
-        const { error } = await supabase.from('assets').update({ sort_order: i + 1 }).eq('id', orderedIds[i]);
-        if (error) {
-          throw new Error(`DB_ERROR: Failed to reorder asset ${orderedIds[i]}: ${error.message}`);
+      try {
+        for (let i = 0; i < orderedIds.length; i++) {
+          await supabase.from('assets').update({ sort_order: i + 1 }).eq('id', orderedIds[i]);
         }
+        reportSupabaseSuccess();
+      } catch (err: any) {
+        reportSupabaseFailure(err);
+        console.warn('[Supabase Exception] reorderAssets:', err?.message || err);
       }
-      return true;
     }
 
     const store = getLocalStore();
     orderedIds.forEach((id, index) => {
-      const asset = store.assets.find((a) => a.id === id);
-      if (asset) asset.sort_order = index + 1;
+      const a = store.assets.find((item) => item.id === id);
+      if (a) a.sort_order = index + 1;
     });
+    store.assets.sort((a, b) => a.sort_order - b.sort_order);
     saveLocalStore(store);
     return true;
   },
