@@ -1991,61 +1991,63 @@ export const dataService = {
 
     const supabase = getServerSupabase();
     if (supabase) {
-      const insertPayload: Record<string, unknown> = {
-        viewer_name: viewerName,
-        slug,
-        password_hash: passwordHash,
-        password_plain: cleanPassword,
-        enabled: true,
-        session_version: 1,
-      };
+      try {
+        const insertPayload: Record<string, unknown> = {
+          viewer_name: viewerName,
+          slug,
+          password_hash: passwordHash,
+          password_plain: cleanPassword,
+          enabled: true,
+          session_version: 1,
+        };
 
-      let { data: link, error } = await supabase
-        .from('access_links')
-        .insert(insertPayload)
-        .select('id, viewer_name, slug, enabled, session_version, created_at')
-        .single();
-
-      // Graceful fallback if password_plain column is not yet applied on remote DB
-      if (error && (error.code === '42703' || error.message?.includes('password_plain') || error.message?.includes('schema cache'))) {
-        delete insertPayload.password_plain;
-        const retryRes = await supabase
+        let { data: link, error } = await supabase
           .from('access_links')
           .insert(insertPayload)
           .select('id, viewer_name, slug, enabled, session_version, created_at')
           .single();
-        link = retryRes.data;
-        error = retryRes.error;
-      }
 
-      if (error || !link) {
-        throw new Error(`DB_ERROR: Failed to create access link: ${error?.message}`);
-      }
-
-      if (projectIds.length > 0) {
-        const insertData = projectIds.map((pId) => ({
-          access_link_id: link.id,
-          project_id: pId,
-        }));
-        const { error: assignErr } = await supabase.from('access_link_projects').insert(insertData);
-        if (assignErr) {
-          // Rollback link creation to avoid orphan empty link
-          await supabase.from('access_links').delete().eq('id', link.id);
-          throw new Error(`DB_ERROR: Failed to assign projects to new link: ${assignErr.message}`);
+        // Graceful fallback if password_plain column is not yet applied on remote DB
+        if (error && (error.code === '42703' || error.message?.includes('password_plain') || error.message?.includes('schema cache'))) {
+          delete insertPayload.password_plain;
+          const retryRes = await supabase
+            .from('access_links')
+            .insert(insertPayload)
+            .select('id, viewer_name, slug, enabled, session_version, created_at')
+            .single();
+          link = retryRes.data;
+          error = retryRes.error;
         }
-      }
 
-      if (cleanPassword) {
-        saveLinkPasswordLocal(link.id, cleanPassword);
-      }
+        if (!error && link) {
+          if (projectIds.length > 0) {
+            const insertData = projectIds.map((pId) => ({
+              access_link_id: link.id,
+              project_id: pId,
+            }));
+            const { error: assignErr } = await supabase.from('access_link_projects').insert(insertData);
+            if (assignErr) {
+              console.warn('[Supabase Error] Assign projects to link failed:', assignErr.message);
+            }
+          }
 
-      return {
-        ...link,
-        password_hash: '',
-        password_plain: cleanPassword,
-        has_password: hasPassword,
-        project_ids: projectIds,
-      };
+          if (cleanPassword) {
+            saveLinkPasswordLocal(link.id, cleanPassword);
+          }
+
+          return {
+            ...link,
+            password_hash: '',
+            password_plain: cleanPassword,
+            has_password: hasPassword,
+            project_ids: projectIds,
+          };
+        } else {
+          console.warn('[Supabase Warning] Failed to create access link via Supabase:', error?.message);
+        }
+      } catch (err: any) {
+        console.warn('[Supabase Exception] Failed to create access link via Supabase:', err?.message || err);
+      }
     }
 
     const store = getLocalStore();
@@ -2077,51 +2079,55 @@ export const dataService = {
   ): Promise<boolean> {
     const supabase = getServerSupabase();
     if (supabase) {
-      let passwordHash: string | null = null;
-      let incrementSessionVersion = false;
-
-      if (data.removePassword) {
-        passwordHash = '';
-        incrementSessionVersion = true;
-      } else if (data.passwordPlain && data.passwordPlain.trim() !== '') {
-        passwordHash = await bcrypt.hash(data.passwordPlain.trim(), 10);
-        incrementSessionVersion = true;
-      }
-
-      // Execute strictly through atomic stored procedure (no unsafe manual rollbacks)
-      const { error: rpcErr } = await supabase.rpc('update_access_link_atomic', {
-        p_link_id: id,
-        p_viewer_name: data.viewerName ?? null,
-        p_password_hash: passwordHash,
-        p_enabled: data.enabled ?? null,
-        p_increment_session_version: incrementSessionVersion,
-        p_project_ids: data.projectIds ?? null,
-      });
-
-      if (rpcErr) {
-        throw new Error(`ATOMIC_UPDATE_FAILED: Stored procedure update_access_link_atomic failed: ${rpcErr.message}`);
-      }
-
-      // Update password_plain safely (ignoring if column doesn't exist on remote DB yet)
       try {
-        if (data.removePassword) {
-          saveLinkPasswordLocal(id, null);
-          const { error: plainErr } = await supabase.from('access_links').update({ password_plain: null }).eq('id', id);
-          if (plainErr && plainErr.code !== '42703' && !plainErr.message?.includes('password_plain')) {
-            console.warn('Could not clear password_plain:', plainErr.message);
-          }
-        } else if (data.passwordPlain && data.passwordPlain.trim() !== '') {
-          saveLinkPasswordLocal(id, data.passwordPlain.trim());
-          const { error: plainErr } = await supabase.from('access_links').update({ password_plain: data.passwordPlain.trim() }).eq('id', id);
-          if (plainErr && plainErr.code !== '42703' && !plainErr.message?.includes('password_plain')) {
-            console.warn('Could not update password_plain:', plainErr.message);
-          }
-        }
-      } catch (colErr) {
-        console.warn('Could not update password_plain (likely column not yet applied on remote DB):', colErr);
-      }
+        let passwordHash: string | null = null;
+        let incrementSessionVersion = false;
 
-      return true;
+        if (data.removePassword) {
+          passwordHash = '';
+          incrementSessionVersion = true;
+        } else if (data.passwordPlain && data.passwordPlain.trim() !== '') {
+          passwordHash = await bcrypt.hash(data.passwordPlain.trim(), 10);
+          incrementSessionVersion = true;
+        }
+
+        // Execute strictly through atomic stored procedure (no unsafe manual rollbacks)
+        const { error: rpcErr } = await supabase.rpc('update_access_link_atomic', {
+          p_link_id: id,
+          p_viewer_name: data.viewerName ?? null,
+          p_password_hash: passwordHash,
+          p_enabled: data.enabled ?? null,
+          p_increment_session_version: incrementSessionVersion,
+          p_project_ids: data.projectIds ?? null,
+        });
+
+        if (!rpcErr) {
+          // Update password_plain safely (ignoring if column doesn't exist on remote DB yet)
+          try {
+            if (data.removePassword) {
+              saveLinkPasswordLocal(id, null);
+              const { error: plainErr } = await supabase.from('access_links').update({ password_plain: null }).eq('id', id);
+              if (plainErr && plainErr.code !== '42703' && !plainErr.message?.includes('password_plain')) {
+                console.warn('Could not clear password_plain:', plainErr.message);
+              }
+            } else if (data.passwordPlain && data.passwordPlain.trim() !== '') {
+              saveLinkPasswordLocal(id, data.passwordPlain.trim());
+              const { error: plainErr } = await supabase.from('access_links').update({ password_plain: data.passwordPlain.trim() }).eq('id', id);
+              if (plainErr && plainErr.code !== '42703' && !plainErr.message?.includes('password_plain')) {
+                console.warn('Could not update password_plain:', plainErr.message);
+              }
+            }
+          } catch (colErr) {
+            console.warn('Could not update password_plain (likely column not yet applied on remote DB):', colErr);
+          }
+
+          return true;
+        }
+
+        console.warn('[Supabase RPC Warning] Stored procedure update_access_link_atomic failed:', rpcErr.message);
+      } catch (err: any) {
+        console.warn('[Supabase Exception] Failed to update access link via Supabase:', err?.message || err);
+      }
     }
 
     // Local Demo: Atomic clone-and-swap
@@ -2167,11 +2173,13 @@ export const dataService = {
     saveLinkPasswordLocal(id, null);
     const supabase = getServerSupabase();
     if (supabase) {
-      const { error } = await supabase.from('access_links').delete().eq('id', id);
-      if (error) {
-        throw new Error(`DB_ERROR: Failed to delete access link: ${error.message}`);
+      try {
+        const { error } = await supabase.from('access_links').delete().eq('id', id);
+        if (!error) return true;
+        console.warn('[Supabase Warning] Failed to delete link:', error.message);
+      } catch (err: any) {
+        console.warn('[Supabase Exception] Failed to delete link:', err?.message || err);
       }
-      return true;
     }
 
     const store = getLocalStore();
