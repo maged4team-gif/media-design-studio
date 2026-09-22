@@ -68,7 +68,12 @@ export function formatClientMediaUrl(
   slug: string,
   extraParams?: Record<string, string>
 ): string {
-  const base = (rawUrl && rawUrl.trim()) ? rawUrl.trim() : `/api/media/${assetId}`;
+  let base = (rawUrl && rawUrl.trim()) ? rawUrl.trim() : `/api/media/${assetId}`;
+
+  // Replace defunct Google Cloud Storage sample videos that return XML AccessDenied
+  if (base.includes('gtv-videos-bucket') || base.includes('commondatastorage.googleapis.com')) {
+    base = 'https://vjs.zencdn.net/v/oceans.mp4';
+  }
 
   // Preserve external URLs (e.g. Supabase signed URLs, external CDN)
   if (base.startsWith('http://') || base.startsWith('https://') || base.startsWith('/uploads/')) {

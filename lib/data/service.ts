@@ -223,12 +223,12 @@ const DEFAULT_SEED_DATA: LocalStore = {
       id: '10000000-0000-0000-0000-000000000001',
       project_id: '00000000-0000-0000-0000-000000000001',
       title: 'شارة البداية الرئيسية ثلاثية الأبعاد - Ident Main',
-      file_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      file_url: 'https://vjs.zencdn.net/v/oceans.mp4',
       thumbnail_url: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=800&q=80',
       file_type: 'video',
       mime_type: 'video/mp4',
-      file_size: 42800000,
-      duration_seconds: 15,
+      file_size: 23014356,
+      duration_seconds: 46,
       version: 'V2',
       sort_order: 1,
       is_visible: true,
@@ -257,7 +257,7 @@ const DEFAULT_SEED_DATA: LocalStore = {
       id: '10000000-0000-0000-0000-000000000003',
       project_id: '00000000-0000-0000-0000-000000000001',
       title: 'فاصل الإعلانات الترويجي - Station Promo Bumper',
-      file_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+      file_url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
       thumbnail_url: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=800&q=80',
       file_type: 'video',
       mime_type: 'video/mp4',
@@ -291,12 +291,12 @@ const DEFAULT_SEED_DATA: LocalStore = {
       id: '20000000-0000-0000-0000-000000000001',
       project_id: '00000000-0000-0000-0000-000000000002',
       title: 'مقدمة نشرة الأخبار الرئيسية - Main News Intro',
-      file_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      file_url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
       thumbnail_url: 'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?auto=format&fit=crop&w=800&q=80',
       file_type: 'video',
       mime_type: 'video/mp4',
-      file_size: 31200000,
-      duration_seconds: 12,
+      file_size: 1128375,
+      duration_seconds: 5,
       version: 'V2',
       sort_order: 1,
       is_visible: true,
@@ -325,12 +325,12 @@ const DEFAULT_SEED_DATA: LocalStore = {
       id: '40000000-0000-0000-0000-000000000001',
       project_id: '00000000-0000-0000-0000-000000000004',
       title: 'شارة العيد الوطني 26 سبتمبر - الفاصل التلفزيوني الرئيسي',
-      file_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      file_url: 'https://vjs.zencdn.net/v/oceans.mp4',
       thumbnail_url: 'https://images.unsplash.com/photo-1533130061792-64b345e4a833?auto=format&fit=crop&w=800&q=80',
       file_type: 'video',
       mime_type: 'video/mp4',
-      file_size: 38400000,
-      duration_seconds: 14,
+      file_size: 23014356,
+      duration_seconds: 46,
       version: 'Final',
       sort_order: 1,
       is_visible: true,
@@ -571,6 +571,11 @@ export async function resolveAssetPlaybackUrl(
   // Handle internal media endpoints (e.g. Drive /api/media/{id})
   if (asset.file_url?.startsWith('/api/')) {
     return attachClientSlug(asset.file_url);
+  }
+
+  // Intercept deprecated Google Cloud Storage sample videos that return XML 403 Access Denied
+  if (asset.file_url?.includes('gtv-videos-bucket') || asset.file_url?.includes('commondatastorage.googleapis.com')) {
+    return 'https://vjs.zencdn.net/v/oceans.mp4';
   }
 
   return asset.file_url;

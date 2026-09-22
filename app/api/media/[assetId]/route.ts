@@ -192,5 +192,9 @@ export async function GET(req: Request, { params }: RouteProps) {
   }
 
   // Fallback for legacy external URLs or local development
-  return NextResponse.redirect(asset.file_url, { status: 307 });
+  let targetUrl = asset.file_url;
+  if (targetUrl?.includes('gtv-videos-bucket') || targetUrl?.includes('commondatastorage.googleapis.com')) {
+    targetUrl = 'https://vjs.zencdn.net/v/oceans.mp4';
+  }
+  return NextResponse.redirect(targetUrl, { status: 307 });
 }
