@@ -361,11 +361,12 @@ export async function exchangeCodeForTokens(
   code: string,
   redirectUri: string
 ): Promise<{ refresh_token?: string; access_token: string; expires_in: number }> {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
 
   if (!clientId || !clientSecret) {
-    throw new Error('CONFIG_ERROR: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured.');
+    const missing = [!clientId && 'GOOGLE_CLIENT_ID', !clientSecret && 'GOOGLE_CLIENT_SECRET'].filter(Boolean).join(' and ');
+    throw new Error(`CONFIG_ERROR: ${missing} not configured.`);
   }
 
   const res = await fetch(GOOGLE_TOKEN_ENDPOINT, {
