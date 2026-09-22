@@ -29,14 +29,21 @@ import {
 interface AdminProjectsViewProps {
   initialProjects: Project[];
   initialLinks?: (AccessLink & { project_ids: string[] })[];
+  systemStatus?: {
+    supabaseConfigured: boolean;
+    dataMode: string;
+    warning?: string;
+  };
 }
 
 export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
   initialProjects,
   initialLinks = [],
+  systemStatus,
 }) => {
   const [projects, setProjects] = useState<Project[]>(initialProjects);
   const [links] = useState<(AccessLink & { project_ids: string[] })[]>(initialLinks);
+  const [showStatusBanner, setShowStatusBanner] = useState(true);
   const [editingProgressId, setEditingProgressId] = useState<string | null>(null);
   const [progressVal, setProgressVal] = useState<number>(0);
   const [filterArchived, setFilterArchived] = useState(false);
@@ -164,6 +171,40 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
       <AdminNavbar />
 
       <main className="mx-auto flex-1 w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        {showStatusBanner && systemStatus?.warning && (
+          <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs font-semibold text-amber-200 animate-fade-in">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="h-5 w-5 text-amber-400 flex-shrink-0" />
+              <span>{systemStatus.warning}</span>
+            </div>
+            <button
+              onClick={() => setShowStatusBanner(false)}
+              className="rounded-lg p-1 text-white/50 hover:text-white transition"
+              title="إغلاق"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {showStatusBanner && !systemStatus?.warning && !systemStatus?.supabaseConfigured && (
+          <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-sky-500/30 bg-sky-500/10 p-4 text-xs font-semibold text-sky-200 animate-fade-in">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-2.5 w-2.5 rounded-full bg-sky-400 animate-pulse flex-shrink-0" />
+              <span>
+                <strong>وضع العرض التجريبي (Showcase Mode):</strong> لوحة التحكم جاهزة ومفعّلة بكافة ميزاتها بالبيانات التجريبية. لحفظ المشاريع في قاعدة بيانات دائمة، يمكنك إضافة متغيرات Supabase في إعدادات Vercel.
+              </span>
+            </div>
+            <button
+              onClick={() => setShowStatusBanner(false)}
+              className="rounded-lg p-1 text-white/50 hover:text-white transition"
+              title="إغلاق"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {driveBanner && (
           <div
             className={`mb-6 flex items-center justify-between gap-3 rounded-2xl border p-4 text-xs font-semibold animate-fade-in ${
