@@ -22,7 +22,7 @@ interface ResumeStatusResult {
   fileId: string | null;
 }
 
-const CHUNK_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB bounded chunks
+const CHUNK_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB bounded chunks (strictly fits within Vercel 4.5MB Serverless limit & Google Drive 256KB alignment)
 
 export const MediaUploader: React.FC<MediaUploaderProps> = ({ projectId, onUploadSuccess }) => {
   const [isDragging, setIsDragging] = useState(false);
