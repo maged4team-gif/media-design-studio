@@ -1,6 +1,7 @@
 import 'server-only';
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 /**
@@ -68,8 +69,40 @@ const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
 const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
 
-const DATA_DIR = path.join(process.cwd(), '.data');
-const getDriveCredsFile = () => process.env.DRIVE_STORAGE_FILE || path.join(DATA_DIR, 'google-drive.json');
+function getDriveDataDir(): string {
+  if (process.env.DRIVE_STORAGE_FILE) {
+    return path.dirname(process.env.DRIVE_STORAGE_FILE);
+  }
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NODE_ENV === 'production') {
+    const tmpDir = path.join(os.tmpdir(), '.data');
+    try {
+      if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+      return tmpDir;
+    } catch {
+      // Fallback
+    }
+  }
+  const localDir = path.join(process.cwd(), '.data');
+  try {
+    if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+    return localDir;
+  } catch {
+    const tmpDir = path.join(os.tmpdir(), '.data');
+    try {
+      if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+      return tmpDir;
+    } catch {
+      return os.tmpdir();
+    }
+  }
+}
+
+export const getDriveCredsFile = () => {
+  if (process.env.DRIVE_STORAGE_FILE) {
+    return process.env.DRIVE_STORAGE_FILE;
+  }
+  return path.join(getDriveDataDir(), 'google-drive.json');
+};
 
 // In-memory token cache (Zero persistence of plain secrets in logs)
 let inMemoryAccessToken: string | null = null;
@@ -85,23 +118,31 @@ export function resetAccessTokenCache(): void {
  * Ensures connection persistence across application restarts.
  */
 export function loadStoredDriveConfig(): StoredDriveConfig | null {
-  try {
-    const credsFile = getDriveCredsFile();
-    if (fs.existsSync(credsFile)) {
-      const raw = fs.readFileSync(credsFile, 'utf8');
-      const data = JSON.parse(raw);
-      if (data?.refresh_token && typeof data.refresh_token === 'string') {
-        if (!process.env.GOOGLE_DRIVE_REFRESH_TOKEN) {
-          process.env.GOOGLE_DRIVE_REFRESH_TOKEN = data.refresh_token;
+  const candidateFiles = [
+    process.env.DRIVE_STORAGE_FILE,
+    getDriveCredsFile(),
+    path.join(process.cwd(), '.data', 'google-drive.json'),
+    path.join(os.tmpdir(), '.data', 'google-drive.json'),
+  ].filter(Boolean) as string[];
+
+  for (const credsFile of candidateFiles) {
+    try {
+      if (fs.existsSync(credsFile)) {
+        const raw = fs.readFileSync(credsFile, 'utf8');
+        const data = JSON.parse(raw);
+        if (data?.refresh_token && typeof data.refresh_token === 'string') {
+          if (!process.env.GOOGLE_DRIVE_REFRESH_TOKEN) {
+            process.env.GOOGLE_DRIVE_REFRESH_TOKEN = data.refresh_token;
+          }
+          if (data.root_folder_id && !process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID) {
+            process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID = data.root_folder_id;
+          }
+          return data;
         }
-        if (data.root_folder_id && !process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID) {
-          process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID = data.root_folder_id;
-        }
-        return data;
       }
+    } catch {
+      // ignore read errors across candidates
     }
-  } catch (err: any) {
-    console.error('Failed to load stored Google Drive config from disk:', err?.message);
   }
   return null;
 }
@@ -110,9 +151,18 @@ export function loadStoredDriveConfig(): StoredDriveConfig | null {
  * Saves Google Drive configuration safely to server disk
  */
 export function saveStoredDriveConfig(config: { refresh_token: string; root_folder_id?: string }): void {
+  // 1. Immediately update runtime environment variables in-memory
+  process.env.GOOGLE_DRIVE_REFRESH_TOKEN = config.refresh_token;
+  if (config.root_folder_id) {
+    process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID = config.root_folder_id;
+  }
+
+  // 2. Persist to disk (handles read-only serverless filesystems like Vercel gracefully)
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    const credsFile = getDriveCredsFile();
+    const credsDir = path.dirname(credsFile);
+    if (!fs.existsSync(credsDir)) {
+      fs.mkdirSync(credsDir, { recursive: true });
     }
     const existing = loadStoredDriveConfig() || { refresh_token: config.refresh_token };
     const updated: StoredDriveConfig = {
@@ -120,15 +170,10 @@ export function saveStoredDriveConfig(config: { refresh_token: string; root_fold
       ...config,
       updated_at: new Date().toISOString(),
     };
-    const credsFile = getDriveCredsFile();
     fs.writeFileSync(credsFile, JSON.stringify(updated, null, 2), 'utf8');
-    process.env.GOOGLE_DRIVE_REFRESH_TOKEN = updated.refresh_token;
-    if (updated.root_folder_id) {
-      process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID = updated.root_folder_id;
-    }
   } catch (err: any) {
-    console.error('Failed to save Google Drive config to disk:', err?.message);
-    throw new Error('STORAGE_WRITE_FAILED: Failed to persist Google Drive credentials to server storage.');
+    console.warn('Warning: Could not write Google Drive credentials to disk (read-only filesystem):', err?.message);
+    // In serverless environments, disk writes may fail; in-memory environment variables are already populated.
   }
 }
 

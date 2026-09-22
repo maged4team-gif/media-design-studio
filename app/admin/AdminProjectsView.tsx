@@ -47,7 +47,12 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
   const [editingProgressId, setEditingProgressId] = useState<string | null>(null);
   const [progressVal, setProgressVal] = useState<number>(0);
   const [filterArchived, setFilterArchived] = useState(false);
-  const [driveBanner, setDriveBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [driveBanner, setDriveBanner] = useState<{
+    type: 'success' | 'error';
+    message: string;
+    refreshToken?: string;
+    rootFolderId?: string;
+  } | null>(null);
   const [sharingProject, setSharingProject] = useState<Project | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -57,7 +62,7 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
       setCopiedKey(key);
       setTimeout(() => setCopiedKey(null), 2000);
     } catch {
-      alert(`الرابط: ${text}`);
+      alert(`القيمة: ${text}`);
     }
   };
 
@@ -65,7 +70,19 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('drive_connected') === 'true') {
-        setDriveBanner({ type: 'success', message: 'تم ربط حساب Google Drive بنجاح وتجهيز مجلد الأرشيف!' });
+        fetch('/api/admin/drive/credentials')
+          .then((r) => r.json())
+          .then((data) => {
+            setDriveBanner({
+              type: 'success',
+              message: 'تم ربط حساب Google Drive بنجاح وتجهيز مجلد الأرشيف!',
+              refreshToken: data.refresh_token,
+              rootFolderId: data.root_folder_id,
+            });
+          })
+          .catch(() => {
+            setDriveBanner({ type: 'success', message: 'تم ربط حساب Google Drive بنجاح وتجهيز مجلد الأرشيف!' });
+          });
       } else if (params.get('drive_error')) {
         setDriveBanner({ type: 'error', message: `خطأ في ربط Google Drive: ${params.get('drive_error')}` });
       }
@@ -207,27 +224,53 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
 
         {driveBanner && (
           <div
-            className={`mb-6 flex items-center justify-between gap-3 rounded-2xl border p-4 text-xs font-semibold animate-fade-in ${
+            className={`mb-6 rounded-2xl border p-4 text-xs font-semibold animate-fade-in ${
               driveBanner.type === 'success'
                 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
                 : 'border-red-500/30 bg-red-500/10 text-red-300'
             }`}
           >
-            <div className="flex items-center gap-2.5">
-              {driveBanner.type === 'success' ? (
-                <CheckCircle2 className="h-5 w-5 text-emerald-400 flex-shrink-0" />
-              ) : (
-                <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0" />
-              )}
-              <span>{driveBanner.message}</span>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                {driveBanner.type === 'success' ? (
+                  <CheckCircle2 className="h-5 w-5 text-emerald-400 flex-shrink-0" />
+                ) : (
+                  <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0" />
+                )}
+                <span>{driveBanner.message}</span>
+              </div>
+              <button
+                onClick={() => setDriveBanner(null)}
+                className="rounded-lg p-1 text-white/50 hover:text-white transition"
+                title="إغلاق"
+              >
+                ✕
+              </button>
             </div>
-            <button
-              onClick={() => setDriveBanner(null)}
-              className="rounded-lg p-1 text-white/50 hover:text-white transition"
-              title="إغلاق"
-            >
-              ✕
-            </button>
+
+            {driveBanner.refreshToken && (
+              <div className="mt-3 pt-3 border-t border-emerald-500/20 text-xs text-emerald-200/90 flex flex-col gap-2">
+                <p className="text-[11px] text-emerald-400/90 font-medium">
+                  💡 للحفاظ على الربط دائمًا في Vercel عبر جميع السيرفرات دون الحاجة لإعادة الربط لاحقاً:
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => handleCopyText(driveBanner.refreshToken!, 'ref_token')}
+                    className="rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 px-3 py-1.5 text-xs text-white transition flex items-center gap-1.5"
+                  >
+                    <span>{copiedKey === 'ref_token' ? 'تم النسخ ✓' : 'نسخ GOOGLE_DRIVE_REFRESH_TOKEN'}</span>
+                  </button>
+                  {driveBanner.rootFolderId && (
+                    <button
+                      onClick={() => handleCopyText(driveBanner.rootFolderId!, 'root_folder')}
+                      className="rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 px-3 py-1.5 text-xs text-white transition flex items-center gap-1.5"
+                    >
+                      <span>{copiedKey === 'root_folder' ? 'تم النسخ ✓' : 'نسخ GOOGLE_DRIVE_ROOT_FOLDER_ID'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
