@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Lock, ArrowLeft, Globe } from 'lucide-react';
 
 interface PasswordGateProps {
@@ -21,6 +21,17 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(isPublic);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
+
+  // Prevent mobile scroll jump (1487px) and ensure viewport stays at top
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if ('scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'manual';
+      }
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    }
+  }, []);
 
   const performLogin = async (pwdToSubmit: string) => {
     setLoading(true);
@@ -33,10 +44,18 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
         body: JSON.stringify({ slug, password: pwdToSubmit }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || 'تعذر تسجيل الدخول');
+        setLoading(false);
+        setTimeout(() => {
+          passwordInputRef.current?.focus();
+          passwordInputRef.current?.select();
+        }, 50);
       } else {
+        if (typeof window !== 'undefined') {
+          window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        }
         if (redirectTo) {
           window.location.href = redirectTo;
         } else {
@@ -44,9 +63,9 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
         }
       }
     } catch {
-      setError('حدث خطأ أثناء الاتصال بالخادم');
-    } finally {
+      setError('حدث خطأ أثناء الاتصال بالخادم. يرجى المحاولة مجدداً.');
       setLoading(false);
+      passwordInputRef.current?.focus();
     }
   };
 
@@ -54,7 +73,14 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
     e.preventDefault();
     const domInput = e.currentTarget?.querySelector('input[type="password"]') as HTMLInputElement | null;
     const pwdToSubmit = password.trim() || domInput?.value?.trim() || '';
-    if (!isPublic && (!pwdToSubmit || loading)) return;
+
+    if (!isPublic && !pwdToSubmit) {
+      setError('يرجى إدخال كلمة المرور للمتابعة');
+      passwordInputRef.current?.focus();
+      return;
+    }
+
+    if (!isPublic && loading) return;
     await performLogin(pwdToSubmit);
   };
 
@@ -66,7 +92,10 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
   }, [isPublic]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-studio-bg p-4">
+    <div
+      className="flex min-h-screen items-center justify-center bg-studio-bg p-4"
+      style={{ overflowAnchor: 'none' }}
+    >
       {/* Background Glow effects */}
       <div className="pointer-events-none fixed inset-0 flex items-center justify-center overflow-hidden">
         <div className="h-[450px] w-[450px] rounded-full bg-studio-blue/10 blur-[120px]" />
@@ -97,13 +126,18 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
           <div className="mt-8 space-y-4">
             {error ? (
               <div className="space-y-3">
-                <p className="text-center text-xs font-medium text-red-400 animate-slide-up">
+                <p
+                  role="alert"
+                  aria-live="assertive"
+                  className="text-center text-xs font-medium text-red-400 animate-slide-up"
+                >
                   {error}
                 </p>
                 <button
                   type="button"
                   onClick={() => performLogin('')}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-studio-blue py-3 px-4 text-sm font-semibold text-white shadow-lg shadow-studio-blue/30 hover:bg-studio-blue-glow transition"
+                  aria-label="إعادة محاولة الدخول المباشر"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-studio-blue py-3 px-4 text-sm font-semibold text-white shadow-lg shadow-studio-blue/30 hover:bg-studio-blue-glow transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
                 >
                   <span>إعادة المحاولة</span>
                   <ArrowLeft className="h-4 w-4" />
@@ -114,7 +148,8 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
                 type="button"
                 onClick={() => performLogin('')}
                 disabled={loading}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-studio-blue py-3 px-4 text-sm font-semibold text-white shadow-lg shadow-studio-blue/30 hover:bg-studio-blue-glow transition disabled:opacity-90"
+                aria-label={`دخول مباشر إلى ${projectTitle || 'المشاريع'}`}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-studio-blue py-3 px-4 text-sm font-semibold text-white shadow-lg shadow-studio-blue/30 hover:bg-studio-blue-glow transition disabled:opacity-90 focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
               >
                 {loading ? (
                   <>
@@ -131,22 +166,47 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
             )}
           </div>
         ) : (
-          /* Password Form */
-          <form onSubmit={handleLogin} className="mt-8 space-y-4">
-            <div>
+          /* Protected Password Form */
+          <form
+            method="POST"
+            action="/api/client/auth"
+            noValidate
+            onSubmit={handleLogin}
+            className="mt-8 space-y-4"
+          >
+            <input type="hidden" name="slug" value={slug} />
+            <div className="relative">
+              <label htmlFor="client-gate-password" className="sr-only">
+                كلمة المرور للدخول
+              </label>
               <input
+                ref={passwordInputRef}
+                id="client-gate-password"
                 type="password"
+                name="password"
+                autoComplete="current-password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (error) setError('');
+                }}
                 placeholder="كلمة المرور"
                 required
+                aria-required="true"
+                aria-invalid={!!error}
+                aria-describedby={error ? 'client-gate-error' : undefined}
                 autoFocus
-                className="w-full rounded-xl border border-white/10 bg-studio-surface px-4 py-3 text-center text-base tracking-widest text-white placeholder-studio-text-muted outline-none transition focus:border-studio-blue focus:ring-2 focus:ring-studio-blue/30"
+                className="w-full rounded-xl border border-white/10 bg-studio-surface px-4 py-3 text-center text-base tracking-widest text-white placeholder-studio-text-muted outline-none transition focus:border-studio-blue focus:ring-2 focus:ring-studio-blue/30 focus-visible:ring-2 focus-visible:ring-studio-blue"
               />
             </div>
 
             {error && (
-              <p className="text-center text-xs font-medium text-red-400 animate-slide-up">
+              <p
+                id="client-gate-error"
+                role="alert"
+                aria-live="assertive"
+                className="text-center text-xs font-medium text-red-400 animate-slide-up"
+              >
                 {error}
               </p>
             )}
@@ -154,7 +214,8 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
             <button
               type="submit"
               disabled={loading || !password.trim()}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-studio-blue py-3 px-4 text-sm font-semibold text-white shadow-lg shadow-studio-blue/30 hover:bg-studio-blue-glow transition disabled:opacity-50"
+              aria-label={projectTitle ? `دخول إلى ${projectTitle}` : 'دخول للمشاريع'}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-studio-blue py-3 px-4 text-sm font-semibold text-white shadow-lg shadow-studio-blue/30 hover:bg-studio-blue-glow transition disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
             >
               {loading ? (
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />

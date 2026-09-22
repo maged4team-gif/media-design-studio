@@ -1,6 +1,6 @@
 import React from 'react';
 import { Asset } from '@/lib/supabase/database.types';
-import { formatFileSize, formatSeconds, getAssetTypeLabel, formatClientMediaUrl } from '@/lib/utils/formatters';
+import { formatFileSize, formatSeconds, getAssetTypeLabel, formatClientMediaUrl, formatArabicCommentCount } from '@/lib/utils/formatters';
 import { ApprovalBadge } from './ApprovalBadge';
 import {
   Play,
@@ -167,7 +167,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
             {commentCount > 0 && (
               <div className="flex items-center gap-1 text-[11px] text-studio-text-muted">
                 <MessageSquare className="h-3 w-3" />
-                <span>{commentCount} ملاحظات</span>
+                <span>{formatArabicCommentCount(commentCount)}</span>
               </div>
             )}
           </div>
@@ -178,11 +178,12 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           {/* مشاهدة */}
           <button
             type="button"
+            aria-label={`مشاهدة ${asset.title}`}
             onClick={(e) => {
               e.stopPropagation();
               onPreview();
             }}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-studio-surface hover:text-white transition"
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-studio-surface hover:text-white transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
           >
             <Eye className="h-3.5 w-3.5 text-studio-blue-glow" />
             <span>مشاهدة</span>
@@ -191,8 +192,9 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           {/* تحميل */}
           <button
             type="button"
+            aria-label={`تحميل الملف: ${asset.title}`}
             onClick={handleDownload}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-studio-surface hover:text-white transition"
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-studio-surface hover:text-white transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
             title="تحميل الملف عبر الرابط المحمي"
           >
             <Download className="h-3.5 w-3.5" />
@@ -203,11 +205,12 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           {allowFeedback && (
             <button
               type="button"
+              aria-label={`إضافة ملاحظة على ${asset.title}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onCommentClick();
               }}
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-studio-surface hover:text-white transition"
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-studio-surface hover:text-white transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
               title="كتابة ملاحظة"
             >
               <MessageSquare className="h-3.5 w-3.5" />
@@ -218,8 +221,9 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           {/* مشاركة الرابط المحمي */}
           <button
             type="button"
+            aria-label={`مشاركة الرابط المحمي لملف ${asset.title}`}
             onClick={handleShare}
-            className="flex items-center justify-center rounded-lg p-1.5 hover:bg-studio-surface hover:text-white transition"
+            className="flex items-center justify-center rounded-lg p-1.5 hover:bg-studio-surface hover:text-white transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
             title="مشاركة رابط الصفحة المحمية للملف"
           >
             <Share2 className="h-3.5 w-3.5" />

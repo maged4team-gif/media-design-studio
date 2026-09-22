@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Project } from '@/lib/supabase/database.types';
 import { StudioHeader } from '@/components/shared/StudioHeader';
 import { ProjectCard } from '@/components/client/ProjectCard';
+import { matchesArabicSearch } from '@/lib/utils/arabic';
 import { useRouter } from 'next/navigation';
 import { FolderKanban } from 'lucide-react';
 
@@ -22,6 +23,16 @@ export const ClientHomeView: React.FC<ClientHomeViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('الكل');
 
+  // Prevent mobile scroll jumping (e.g., 1487px jump) and ensure viewport begins at top
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if ('scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'manual';
+      }
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    }
+  }, []);
+
   // Extract unique categories
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -31,12 +42,12 @@ export const ClientHomeView: React.FC<ClientHomeViewProps> = ({
     return Array.from(set);
   }, [projects]);
 
-  // Filter projects based on category and search
+  // Filter projects based on category and intelligent Arabic search
   const filteredProjects = useMemo(() => {
     return projects.filter((project) => {
       const matchesSearch =
-        project.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (project.description && project.description.toLowerCase().includes(searchQuery.toLowerCase()));
+        matchesArabicSearch(project.title, searchQuery) ||
+        matchesArabicSearch(project.description, searchQuery);
 
       const matchesCategory =
         activeCategory === 'الكل' || project.category === activeCategory;
@@ -55,7 +66,7 @@ export const ClientHomeView: React.FC<ClientHomeViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-studio-bg flex flex-col">
+    <div className="min-h-screen bg-studio-bg flex flex-col" style={{ overflowAnchor: 'none' }}>
       {/* Studio Header */}
       <StudioHeader
         viewerName={viewerName}

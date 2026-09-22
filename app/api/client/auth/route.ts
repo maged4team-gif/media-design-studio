@@ -29,21 +29,33 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { slug, password } = await req.json();
+    let slug = '';
+    let password = '';
+
+    const contentType = req.headers.get('content-type') || '';
+    const isFormSubmission =
+      contentType.includes('application/x-www-form-urlencoded') ||
+      contentType.includes('multipart/form-data');
+
+    if (isFormSubmission) {
+      const formData = await req.formData().catch(() => null);
+      slug = (formData?.get('slug') as string) || '';
+      password = (formData?.get('password') as string) || '';
+    } else {
+      const body = await req.json().catch(() => ({}));
+      slug = body?.slug || '';
+      password = body?.password || '';
+    }
 
     if (!slug || typeof slug !== 'string') {
       return NextResponse.json({ error: 'معرّف الرابط غير صالح' }, { status: 400 });
     }
 
     const link = await dataService.getAccessLinkAuthDataBySlug(slug);
-    if (!link) {
+    // Generic safe error message to prevent link enumeration / probing attacks
+    if (!link || !link.enabled) {
       recordRateLimitAttempt(rateLimitKey);
-      return NextResponse.json({ error: 'رابط الوصول غير موجود' }, { status: 404 });
-    }
-
-    if (!link.enabled) {
-      recordRateLimitAttempt(rateLimitKey);
-      return NextResponse.json({ error: 'تم تعطيل رابط الوصول هذا من قبل إدارة الاستوديو' }, { status: 403 });
+      return NextResponse.json({ error: 'رابط الوصول غير صالح أو تم إيقافه' }, { status: 401 });
     }
 
     // Determine if public link (no password required)
@@ -85,6 +97,10 @@ export async function POST(req: Request) {
     } catch (sessionError) {
       console.error('Failed to issue client session cookie:', sessionError);
       return NextResponse.json({ error: 'فشل إصدار جلسة العميل الآمنة' }, { status: 500 });
+    }
+
+    if (isFormSubmission) {
+      return NextResponse.redirect(new URL(`/p/${encodeURIComponent(link.slug)}`, req.url), 303);
     }
 
     return NextResponse.json({

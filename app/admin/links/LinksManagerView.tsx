@@ -588,31 +588,33 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
               </p>
 
               {error && (
-                <div className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-400 flex items-center gap-2">
+                <div role="alert" aria-live="assertive" className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-400 flex items-center gap-2">
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   <span>{error}</span>
                 </div>
               )}
 
-              <form onSubmit={handleCreateLink} className="space-y-4">
+              <form onSubmit={handleCreateLink} noValidate className="space-y-4">
                 {/* Client Name */}
                 <div>
-                  <label className="block text-xs font-semibold text-white mb-1.5">
+                  <label htmlFor="create-link-viewer-name" className="block text-xs font-semibold text-white mb-1.5">
                     اسم العميل <span className="text-red-400">*</span>
                   </label>
                   <input
+                    id="create-link-viewer-name"
                     type="text"
                     value={viewerName}
                     onChange={(e) => setViewerName(e.target.value)}
                     placeholder="مثال: أحمد، قناة الهلال، الأستاذ فهد"
                     required
-                    className="w-full rounded-xl border border-white/10 bg-studio-surface px-3.5 py-2.5 text-xs text-white outline-none focus:border-studio-blue"
+                    aria-required="true"
+                    className="w-full rounded-xl border border-white/10 bg-studio-surface px-3.5 py-2.5 text-xs text-white outline-none focus:border-studio-blue focus-visible:ring-2 focus-visible:ring-studio-blue"
                   />
                 </div>
 
                 {/* Public Link Toggle */}
                 <div className="rounded-xl border border-white/10 bg-studio-surface/60 p-3">
-                  <label className="flex items-center justify-between cursor-pointer">
+                  <label htmlFor="create-link-is-public" className="flex items-center justify-between cursor-pointer">
                     <div className="flex items-center gap-2.5">
                       <div
                         className={`p-2 rounded-lg border ${
@@ -631,6 +633,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
                       </div>
                     </div>
                     <input
+                      id="create-link-is-public"
                       type="checkbox"
                       checked={isPublic}
                       onChange={(e) => setIsPublic(e.target.checked)}
@@ -642,16 +645,18 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
                 {/* Password - only if not public */}
                 {!isPublic ? (
                   <div>
-                    <label className="block text-xs font-semibold text-white mb-1.5">
+                    <label htmlFor="create-link-password" className="block text-xs font-semibold text-white mb-1.5">
                       كلمة المرور الخاصة بالعميل <span className="text-red-400">*</span>
                     </label>
                     <input
+                      id="create-link-password"
                       type="text"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="مثال: 2580 أو أي كلمة سر"
                       required={!isPublic}
-                      className="w-full rounded-xl border border-white/10 bg-studio-surface px-3.5 py-2.5 text-xs text-white outline-none focus:border-studio-blue font-mono"
+                      aria-required={!isPublic}
+                      className="w-full rounded-xl border border-white/10 bg-studio-surface px-3.5 py-2.5 text-xs text-white outline-none focus:border-studio-blue font-mono focus-visible:ring-2 focus-visible:ring-studio-blue"
                     />
                     <p className="mt-1 text-[11px] text-studio-text-muted">
                       يتم تشفير كلمة المرور ولا تخزن كنص عادي (Bcrypt hash).
@@ -735,30 +740,32 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
               </p>
 
               {editError && (
-                <div className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-400 flex items-center gap-2">
+                <div role="alert" aria-live="assertive" className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-400 flex items-center gap-2">
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   <span>{editError}</span>
                 </div>
               )}
 
-              <form onSubmit={handleUpdateLink} className="space-y-4">
+              <form onSubmit={handleUpdateLink} noValidate className="space-y-4">
                 {/* Client Name */}
                 <div>
-                  <label className="block text-xs font-semibold text-white mb-1.5">
+                  <label htmlFor="edit-link-viewer-name" className="block text-xs font-semibold text-white mb-1.5">
                     اسم العميل <span className="text-red-400">*</span>
                   </label>
                   <input
+                    id="edit-link-viewer-name"
                     type="text"
                     value={editViewerName}
                     onChange={(e) => setEditViewerName(e.target.value)}
                     required
-                    className="w-full rounded-xl border border-white/10 bg-studio-surface px-3.5 py-2.5 text-xs text-white outline-none focus:border-studio-blue"
+                    aria-required="true"
+                    className="w-full rounded-xl border border-white/10 bg-studio-surface px-3.5 py-2.5 text-xs text-white outline-none focus:border-studio-blue focus-visible:ring-2 focus-visible:ring-studio-blue"
                   />
                 </div>
 
                 {/* Public Link Toggle */}
                 <div className="rounded-xl border border-white/10 bg-studio-surface/60 p-3">
-                  <label className="flex items-center justify-between cursor-pointer">
+                  <label htmlFor="edit-link-is-public" className="flex items-center justify-between cursor-pointer">
                     <div className="flex items-center gap-2.5">
                       <div
                         className={`p-2 rounded-lg border ${
@@ -777,6 +784,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
                       </div>
                     </div>
                     <input
+                      id="edit-link-is-public"
                       type="checkbox"
                       checked={editIsPublic}
                       onChange={(e) => setEditIsPublic(e.target.checked)}
@@ -788,15 +796,16 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
                 {/* Password if not public */}
                 {!editIsPublic ? (
                   <div>
-                    <label className="block text-xs font-semibold text-white mb-1.5">
+                    <label htmlFor="edit-link-password" className="block text-xs font-semibold text-white mb-1.5">
                       كلمة المرور للعميل
                     </label>
                     <input
+                      id="edit-link-password"
                       type="text"
                       value={editPassword}
                       onChange={(e) => setEditPassword(e.target.value)}
                       placeholder={editingLink.password_plain ? editingLink.password_plain : 'اتركها فارغة للاحتفاظ بالسابقة، أو اكتب كلمة جديدة'}
-                      className="w-full rounded-xl border border-white/10 bg-studio-surface px-3.5 py-2.5 text-xs text-white outline-none focus:border-studio-blue font-mono"
+                      className="w-full rounded-xl border border-white/10 bg-studio-surface px-3.5 py-2.5 text-xs text-white outline-none focus:border-studio-blue font-mono focus-visible:ring-2 focus-visible:ring-studio-blue"
                     />
                     <p className="mt-1 text-[11px] text-studio-text-muted">
                       {editingLink.password_plain

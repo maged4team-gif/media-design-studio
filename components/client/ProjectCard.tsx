@@ -1,6 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { Project } from '@/lib/supabase/database.types';
+import { formatArabicFileCount } from '@/lib/utils/formatters';
 import { ArrowLeft, FolderKanban } from 'lucide-react';
 
 interface ProjectCardProps {
@@ -53,7 +54,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, slug }) => {
 
         {/* Number of Files & Optional Progress Percentage */}
         <div className="mt-3 flex items-center justify-between text-xs text-studio-text-secondary">
-          <span>{fileCount} ملف</span>
+          <span>{formatArabicFileCount(fileCount)}</span>
           {project.show_progress !== false && (
             <span className="font-semibold text-white">{progress}%</span>
           )}

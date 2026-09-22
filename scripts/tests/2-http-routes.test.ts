@@ -100,7 +100,7 @@ async function runHttpTests() {
       id: HTTP_ASSET_A1,
       project_id: HTTP_PROJ_A,
       title: '__HTTP_TEST_ASSET_A1__',
-      file_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      file_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
       storage_path: `projects/${HTTP_PROJ_A}/asset_main_a1.mp4`,
       thumbnail_url: 'https://images.unsplash.com/photo-thumb-a',
       thumbnail_storage_path: `projects/${HTTP_PROJ_A}/thumb_a1.jpg`,

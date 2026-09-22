@@ -77,7 +77,7 @@ VALUES
     '10000000-0000-0000-0000-000000000001',
     '00000000-0000-0000-0000-000000000001',
     'شارة البداية الرئيسية ثلاثية الأبعاد - Ident Main',
-    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
     'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=800&q=80',
     'video',
     'video/mp4',
@@ -160,6 +160,48 @@ VALUES
     NULL,
     'V1',
     2,
+    true
+  ),
+  (
+    '40000000-0000-0000-0000-000000000001',
+    '00000000-0000-0000-0000-000000000004',
+    'شارة العيد الوطني 26 سبتمبر - الفاصل التلفزيوني الرئيسي',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    'https://images.unsplash.com/photo-1533130061792-64b345e4a833?auto=format&fit=crop&w=800&q=80',
+    'video',
+    'video/mp4',
+    38400000,
+    14,
+    'Final',
+    1,
+    true
+  ),
+  (
+    '40000000-0000-0000-0000-000000000002',
+    '00000000-0000-0000-0000-000000000004',
+    'دليل الهوية التلفزيونية والشعار المعتمد 26 سبتمبر',
+    'https://images.unsplash.com/photo-1541872703-74c5e44368f9?auto=format&fit=crop&w=1600&q=80',
+    'https://images.unsplash.com/photo-1541872703-74c5e44368f9?auto=format&fit=crop&w=800&q=80',
+    'image',
+    'image/jpeg',
+    4200000,
+    NULL,
+    'Final',
+    2,
+    true
+  ),
+  (
+    '40000000-0000-0000-0000-000000000003',
+    '00000000-0000-0000-0000-000000000004',
+    'حزمة القوالب والمشاريع المفتوحة (AE & 3D Assets)',
+    'https://example.com/september-26-assets.zip',
+    'https://images.unsplash.com/photo-1626785774573-4b799315345d?auto=format&fit=crop&w=800&q=80',
+    'file',
+    'application/zip',
+    145000000,
+    NULL,
+    'Final',
+    3,
     true
   )
 ON CONFLICT (id) DO NOTHING;

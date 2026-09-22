@@ -16,6 +16,7 @@ import {
   FileText,
   User,
   AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 
 interface MediaLightboxProps {
@@ -50,6 +51,26 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
   const [commentError, setCommentError] = useState('');
   const [currentVideoTime, setCurrentVideoTime] = useState<number>(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Video playback resilience state: loading, loaded, error
+  const [videoState, setVideoState] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const [videoRetryKey, setVideoRetryKey] = useState(0);
+
+  // Reset video state & start 10s fallback timeout when asset or retryKey changes
+  useEffect(() => {
+    if (asset?.file_type === 'video') {
+      setVideoState('loading');
+      const timer = setTimeout(() => {
+        setVideoState((prev) => (prev === 'loading' ? 'error' : prev));
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [asset?.id, videoRetryKey, asset?.file_type]);
+
+  const handleRetryVideo = () => {
+    setVideoState('loading');
+    setVideoRetryKey((k) => k + 1);
+  };
 
   // Close on Escape
   useEffect(() => {
@@ -135,7 +156,8 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-4 left-4 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-md hover:bg-white/20 transition"
+          aria-label="إغلاق نافذة المعاينة"
+          className="absolute top-4 left-4 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-md hover:bg-white/20 transition focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
           title="إغلاق"
         >
           <X className="h-5 w-5" />
@@ -145,13 +167,63 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
         <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden bg-black/95">
           {asset.file_type === 'video' ? (
             <div className="relative flex h-full w-full items-center justify-center p-2">
+              {/* Video Loading State */}
+              {videoState === 'loading' && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/80 backdrop-blur-sm animate-fade-in text-center p-4">
+                  <div className="h-10 w-10 animate-spin rounded-full border-2 border-studio-blue border-t-transparent" />
+                  <p className="text-sm font-semibold text-white">جارٍ تجهيز مشغل الفيديو...</p>
+                  <p className="text-xs text-studio-text-muted">يتم تحميل البث بجودة الاستوديو العالية</p>
+                </div>
+              )}
+
+              {/* Video Error State with Retry & Direct Download */}
+              {videoState === 'error' && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-black/90 p-6 text-center animate-fade-in max-w-md mx-auto">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/15 text-red-400 border border-red-500/25 shadow-lg shadow-red-500/10">
+                    <AlertCircle className="h-7 w-7" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">تعذر تشغيل الفيديو</h3>
+                    <p className="mt-1 text-xs text-studio-text-secondary leading-relaxed">
+                      قد يكون تنسيق الفيديو غير مدعوم في المتصفح أو أن الاتصال بالخادم تعثر. يمكنك إعادة المحاولة أو تحميل الملف للمشاهدة المباشرة.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-center gap-3 mt-2">
+                    <button
+                      type="button"
+                      onClick={handleRetryVideo}
+                      aria-label="إعادة محاولة تشغيل الفيديو"
+                      className="flex items-center gap-1.5 rounded-xl bg-studio-blue px-4 py-2 text-xs font-semibold text-white shadow-md shadow-studio-blue/30 hover:bg-studio-blue-glow transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      <span>إعادة المحاولة</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownload}
+                      aria-label={`تنزيل الملف للمشاهدة المباشرة: ${asset.title}`}
+                      className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-studio-surface px-4 py-2 text-xs font-semibold text-white hover:bg-white/10 transition focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      <span>تنزيل الملف المباشر</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <video
+                key={`${asset.id}-${videoRetryKey}`}
                 ref={videoRef}
                 src={mediaSrc}
                 controls
                 playsInline
                 onTimeUpdate={handleVideoTimeUpdate}
-                className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+                onCanPlay={() => setVideoState('loaded')}
+                onLoadedData={() => setVideoState('loaded')}
+                onError={() => setVideoState('error')}
+                className={`max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-300 ${
+                  videoState === 'loaded' ? 'opacity-100' : 'opacity-0'
+                }`}
               />
             </div>
           ) : asset.file_type === 'image' ? (
@@ -178,7 +250,8 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
               <button
                 type="button"
                 onClick={handleDownload}
-                className="flex items-center gap-2 rounded-xl bg-studio-blue px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-studio-blue/30 hover:bg-studio-blue-glow transition"
+                aria-label={`تحميل الملف: ${asset.title}`}
+                className="flex items-center gap-2 rounded-xl bg-studio-blue px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-studio-blue/30 hover:bg-studio-blue-glow transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
               >
                 <Download className="h-4 w-4" />
                 <span>تحميل الملف عبر الرابط المحمي</span>
@@ -213,7 +286,8 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
               <button
                 type="button"
                 onClick={handleDownload}
-                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-studio-surface px-3 py-1.5 text-xs text-white hover:bg-white/10 transition"
+                aria-label={`تحميل الملف: ${asset.title}`}
+                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-studio-surface px-3 py-1.5 text-xs text-white hover:bg-white/10 transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
                 title="تحميل الملف"
               >
                 <Download className="h-3.5 w-3.5" />
@@ -224,7 +298,8 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
               <button
                 type="button"
                 onClick={handleShare}
-                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-studio-surface px-3 py-1.5 text-xs text-white hover:bg-white/10 transition"
+                aria-label={`مشاركة رابط الصفحة المحمية للملف: ${asset.title}`}
+                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-studio-surface px-3 py-1.5 text-xs text-white hover:bg-white/10 transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
                 title="مشاركة رابط الصفحة المحمية"
               >
                 <Share2 className="h-3.5 w-3.5" />
@@ -308,14 +383,18 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
           {/* Comment Input Form */}
           <div className="border-t border-white/5 bg-studio-surface/90 p-4">
             {commentError && (
-              <div className="mb-2.5 flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 p-2 text-[11px] text-red-400">
+              <div role="alert" aria-live="assertive" className="mb-2.5 flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 p-2 text-[11px] text-red-400">
                 <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
                 <span>{commentError}</span>
               </div>
             )}
 
-            <form onSubmit={(e) => handleSubmitComment(e, false)} className="space-y-2.5">
+            <form onSubmit={(e) => handleSubmitComment(e, false)} noValidate className="space-y-2.5">
+              <label htmlFor="lightbox-comment-text" className="sr-only">
+                كتابة ملاحظة أو تعليق على الملف
+              </label>
               <textarea
+                id="lightbox-comment-text"
                 value={commentText}
                 onChange={(e) => {
                   setCommentText(e.target.value);
@@ -323,7 +402,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
                 }}
                 placeholder={`أضف ملاحظتك باسم "${viewerName}"...`}
                 rows={2}
-                className="w-full resize-none rounded-xl border border-white/10 bg-studio-card p-3 text-xs text-white placeholder-studio-text-muted outline-none transition focus:border-studio-blue focus:ring-1 focus:ring-studio-blue"
+                className="w-full resize-none rounded-xl border border-white/10 bg-studio-card p-3 text-xs text-white placeholder-studio-text-muted outline-none transition focus:border-studio-blue focus:ring-1 focus:ring-studio-blue focus-visible:ring-2 focus-visible:ring-studio-blue"
               />
 
               <div className="flex items-center justify-between gap-2">
@@ -333,7 +412,8 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
                     type="button"
                     onClick={(e) => handleSubmitComment(e, true)}
                     disabled={!commentText.trim() || isSubmittingComment}
-                    className="flex items-center gap-1.5 rounded-lg border border-studio-blue/30 bg-studio-blue/10 px-2.5 py-1.5 text-[11px] font-medium text-studio-blue-glow hover:bg-studio-blue/20 transition disabled:opacity-40"
+                    aria-label={`إضافة ملاحظة مقترنة بالتوقيت ${formatSeconds(currentVideoTime)}`}
+                    className="flex items-center gap-1.5 rounded-lg border border-studio-blue/30 bg-studio-blue/10 px-2.5 py-1.5 text-[11px] font-medium text-studio-blue-glow hover:bg-studio-blue/20 transition disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
                     title={`إضافة ملاحظة عند ${formatSeconds(currentVideoTime)}`}
                   >
                     <Clock className="h-3 w-3" />
@@ -345,7 +425,8 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
                 <button
                   type="submit"
                   disabled={!commentText.trim() || isSubmittingComment}
-                  className="flex items-center gap-1.5 rounded-lg bg-studio-blue px-4 py-1.5 text-xs font-semibold text-white shadow-md shadow-studio-blue/20 hover:bg-studio-blue-glow transition disabled:opacity-40"
+                  aria-label="إرسال الملاحظة"
+                  className="flex items-center gap-1.5 rounded-lg bg-studio-blue px-4 py-1.5 text-xs font-semibold text-white shadow-md shadow-studio-blue/20 hover:bg-studio-blue-glow transition disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
                 >
                   <Send className="h-3 w-3 -scale-x-100" />
                   <span>{isSubmittingComment ? 'جارٍ الإرسال...' : 'إرسال'}</span>

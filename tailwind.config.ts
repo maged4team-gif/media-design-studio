@@ -14,8 +14,8 @@ const config: Config = {
           surface: "#0c111d",
           card: "#111726",
           "card-hover": "#172033",
-          border: "#1e293b",
-          "border-light": "#2a374f",
+          border: "#26354a",
+          "border-light": "#334155",
           blue: {
             DEFAULT: "#2563eb",
             glow: "#38bdf8",
@@ -25,13 +25,13 @@ const config: Config = {
           gold: {
             DEFAULT: "#f59e0b",
             light: "#fbbf24",
-            dark: "#d97706",
+            dark: "#b45309",
             subtle: "rgba(245, 158, 11, 0.12)",
           },
           text: {
             primary: "#f8fafc",
-            secondary: "#94a3b8",
-            muted: "#64748b",
+            secondary: "#cbd5e1",
+            muted: "#94a3b8",
           },
         },
       },

@@ -44,8 +44,19 @@ export async function POST(req: Request) {
   }
 
   try {
-    const body = await req.json().catch(() => ({}));
-    const { password } = body;
+    let password = '';
+    const contentType = req.headers.get('content-type') || '';
+    const isFormSubmission =
+      contentType.includes('application/x-www-form-urlencoded') ||
+      contentType.includes('multipart/form-data');
+
+    if (isFormSubmission) {
+      const formData = await req.formData().catch(() => null);
+      password = (formData?.get('password') as string) || '';
+    } else {
+      const body = await req.json().catch(() => ({}));
+      password = body?.password || '';
+    }
 
     if (!password || typeof password !== 'string') {
       return NextResponse.json({ error: 'يرجى إدخال كلمة مرور الإدارة' }, { status: 400 });
@@ -60,6 +71,10 @@ export async function POST(req: Request) {
     // 5. Success: Reset rate limiter & set secure HttpOnly cookie session
     resetRateLimit(rateLimitKey);
     await setAdminSession();
+
+    if (isFormSubmission) {
+      return NextResponse.redirect(new URL('/admin', req.url), 303);
+    }
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

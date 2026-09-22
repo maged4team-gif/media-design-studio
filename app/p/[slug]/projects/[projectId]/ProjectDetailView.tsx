@@ -38,6 +38,16 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
   const progress = Math.min(100, Math.max(0, project.progress || 0));
 
+  // Ensure initial scroll position starts cleanly at top and disable automatic mobile jump
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if ('scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'manual';
+      }
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    }
+  }, []);
+
   // Check URL query parameters for shared asset links: ?asset=...
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -207,7 +217,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-studio-bg flex flex-col">
+    <div className="min-h-screen bg-studio-bg flex flex-col" style={{ overflowAnchor: 'none' }}>
       {/* Studio Header */}
       <StudioHeader viewerName={viewerName} onLogout={handleLogout} />
 

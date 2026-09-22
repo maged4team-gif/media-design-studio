@@ -18,6 +18,7 @@ const eslintConfig = [
       "build/**",
       "dist/**",
       ".data/**",
+      ".chrome*/**",
       "next-env.d.ts",
     ],
   },

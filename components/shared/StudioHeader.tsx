@@ -66,9 +66,11 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
 
             {onLogout && (
               <button
+                type="button"
                 onClick={onLogout}
+                aria-label="تسجيل الخروج من الجلسة"
                 title="تسجيل الخروج"
-                className="flex items-center gap-1.5 rounded-lg border border-white/5 bg-studio-surface/60 px-3 py-1.5 text-xs text-studio-text-muted hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-400 transition"
+                className="flex items-center gap-1.5 rounded-lg border border-white/5 bg-studio-surface/60 px-3 py-1.5 text-xs text-studio-text-muted hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-400 transition focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:outline-none"
               >
                 <LogOut className="h-3.5 w-3.5" />
                 <span>خروج</span>
@@ -83,24 +85,29 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
             {/* Search Input */}
             {onSearchChange && (
               <div className="relative w-full md:w-80">
+                <label htmlFor="studio-header-search" className="sr-only">
+                  بحث في المشاريع
+                </label>
                 <Search className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-studio-text-muted" />
                 <input
-                  type="text"
+                  id="studio-header-search"
+                  type="search"
                   value={searchQuery}
                   onChange={(e) => onSearchChange(e.target.value)}
                   placeholder="بحث في المشاريع..."
-                  className="w-full rounded-xl border border-white/10 bg-studio-surface py-2 pr-10 pl-4 text-sm text-white placeholder-studio-text-muted outline-none transition focus:border-studio-blue focus:ring-1 focus:ring-studio-blue"
+                  className="w-full rounded-xl border border-white/10 bg-studio-surface py-2 pr-10 pl-4 text-sm text-white placeholder-studio-text-muted outline-none transition focus:border-studio-blue focus:ring-1 focus:ring-studio-blue focus-visible:ring-2 focus-visible:ring-studio-blue"
                 />
               </div>
             )}
 
             {/* Category Filter Pills */}
             {categories.length > 0 && onCategoryChange && (
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="تصفية المشاريع حسب التصنيف">
                 <button
                   type="button"
+                  aria-pressed={activeCategory === 'الكل'}
                   onClick={() => onCategoryChange('الكل')}
-                  className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
+                  className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none ${
                     activeCategory === 'الكل'
                       ? 'bg-studio-blue text-white shadow-md shadow-studio-blue/25'
                       : 'bg-studio-surface text-studio-text-secondary hover:bg-studio-card hover:text-white'
@@ -112,8 +119,9 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
                   <button
                     key={cat}
                     type="button"
+                    aria-pressed={activeCategory === cat}
                     onClick={() => onCategoryChange(cat)}
-                    className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
+                    className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none ${
                       activeCategory === cat
                         ? 'bg-studio-blue text-white shadow-md shadow-studio-blue/25'
                         : 'bg-studio-surface text-studio-text-secondary hover:bg-studio-card hover:text-white'

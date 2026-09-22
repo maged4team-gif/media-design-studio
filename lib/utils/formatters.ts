@@ -97,3 +97,49 @@ export function formatClientMediaUrl(
   return query ? `${pathname}?${query}` : pathname;
 }
 
+/**
+ * Formats file count according to standard Arabic grammatical rules (العدد والمعدود للمذكر: ملف):
+ * - 0: "لا توجد ملفات"
+ * - 1: "ملف واحد"
+ * - 2: "ملفان"
+ * - 3-10: "N ملفات"
+ * - 11-99: "N ملفاً"
+ * - 100+: Follows the rule of the last two digits (e.g. 100 ملف, 105 ملفات, 120 ملفاً)
+ */
+export function formatArabicFileCount(count: number | null | undefined): string {
+  const n = Math.max(0, Math.floor(count ?? 0));
+  if (n === 0) return 'لا توجد ملفات';
+  if (n === 1) return 'ملف واحد';
+  if (n === 2) return 'ملفان';
+
+  const rem100 = n % 100;
+  if (rem100 >= 3 && rem100 <= 10) {
+    return `${n} ملفات`;
+  }
+  if (rem100 >= 11 && rem100 <= 99) {
+    return `${n} ملفاً`;
+  }
+  return `${n} ملف`;
+}
+
+/**
+ * Formats comment count according to standard Arabic grammatical rules (العدد والمعدود للمؤنث: ملاحظة):
+ * - 0: "لا توجد ملاحظات"
+ * - 1: "ملاحظة واحدة"
+ * - 2: "ملاحظتان"
+ * - 3-10: "N ملاحظات"
+ * - 11-99: "N ملاحظة"
+ */
+export function formatArabicCommentCount(count: number | null | undefined): string {
+  const n = Math.max(0, Math.floor(count ?? 0));
+  if (n === 0) return 'لا توجد ملاحظات';
+  if (n === 1) return 'ملاحظة واحدة';
+  if (n === 2) return 'ملاحظتان';
+
+  const rem100 = n % 100;
+  if (rem100 >= 3 && rem100 <= 10) {
+    return `${n} ملاحظات`;
+  }
+  return `${n} ملاحظة`;
+}
+

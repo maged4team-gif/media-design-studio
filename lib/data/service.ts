@@ -223,7 +223,7 @@ const DEFAULT_SEED_DATA: LocalStore = {
       id: '10000000-0000-0000-0000-000000000001',
       project_id: '00000000-0000-0000-0000-000000000001',
       title: 'شارة البداية الرئيسية ثلاثية الأبعاد - Ident Main',
-      file_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      file_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
       thumbnail_url: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=800&q=80',
       file_type: 'video',
       mime_type: 'video/mp4',
@@ -232,7 +232,7 @@ const DEFAULT_SEED_DATA: LocalStore = {
       version: 'V2',
       sort_order: 1,
       is_visible: true,
-      original_filename: 'BigBuckBunny.mp4',
+      original_filename: 'main_ident.mp4',
       storage_path: null,
       created_at: new Date('2026-02-01T10:00:00Z').toISOString(),
     },
@@ -320,6 +320,57 @@ const DEFAULT_SEED_DATA: LocalStore = {
       original_filename: 'lower_thirds.jpg',
       storage_path: null,
       created_at: new Date('2026-02-12T14:00:00Z').toISOString(),
+    },
+    {
+      id: '40000000-0000-0000-0000-000000000001',
+      project_id: '00000000-0000-0000-0000-000000000004',
+      title: 'شارة العيد الوطني 26 سبتمبر - الفاصل التلفزيوني الرئيسي',
+      file_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      thumbnail_url: 'https://images.unsplash.com/photo-1533130061792-64b345e4a833?auto=format&fit=crop&w=800&q=80',
+      file_type: 'video',
+      mime_type: 'video/mp4',
+      file_size: 38400000,
+      duration_seconds: 14,
+      version: 'Final',
+      sort_order: 1,
+      is_visible: true,
+      original_filename: 'september_26_ident.mp4',
+      storage_path: null,
+      created_at: new Date('2026-02-11T10:00:00Z').toISOString(),
+    },
+    {
+      id: '40000000-0000-0000-0000-000000000002',
+      project_id: '00000000-0000-0000-0000-000000000004',
+      title: 'دليل الهوية التلفزيونية والشعار المعتمد 26 سبتمبر',
+      file_url: 'https://images.unsplash.com/photo-1541872703-74c5e44368f9?auto=format&fit=crop&w=1600&q=80',
+      thumbnail_url: 'https://images.unsplash.com/photo-1541872703-74c5e44368f9?auto=format&fit=crop&w=800&q=80',
+      file_type: 'image',
+      mime_type: 'image/jpeg',
+      file_size: 4200000,
+      duration_seconds: null,
+      version: 'Final',
+      sort_order: 2,
+      is_visible: true,
+      original_filename: 'september_26_identity_guide.jpg',
+      storage_path: null,
+      created_at: new Date('2026-02-12T11:00:00Z').toISOString(),
+    },
+    {
+      id: '40000000-0000-0000-0000-000000000003',
+      project_id: '00000000-0000-0000-0000-000000000004',
+      title: 'حزمة القوالب والمشاريع المفتوحة (AE & 3D Assets)',
+      file_url: 'https://example.com/september-26-assets.zip',
+      thumbnail_url: 'https://images.unsplash.com/photo-1626785774573-4b799315345d?auto=format&fit=crop&w=800&q=80',
+      file_type: 'file',
+      mime_type: 'application/zip',
+      file_size: 145000000,
+      duration_seconds: null,
+      version: 'Final',
+      sort_order: 3,
+      is_visible: true,
+      original_filename: 'september_26_package.zip',
+      storage_path: null,
+      created_at: new Date('2026-02-13T12:00:00Z').toISOString(),
     },
   ],
   access_links: [
@@ -426,6 +477,35 @@ function getLocalStore(): LocalStore {
     if (fs.existsSync(storeFile)) {
       const data = fs.readFileSync(storeFile, 'utf-8');
       const parsed = JSON.parse(data) as LocalStore;
+
+      // Ensure seed deliverables and projects are retained if store was created before updates
+      let updated = false;
+      for (const p of DEFAULT_SEED_DATA.projects) {
+        if (!parsed.projects.some((ep) => ep.id === p.id)) {
+          parsed.projects.push(p);
+          updated = true;
+        }
+      }
+      for (const a of DEFAULT_SEED_DATA.assets) {
+        if (!parsed.assets.some((ea) => ea.id === a.id)) {
+          parsed.assets.push(a);
+          updated = true;
+        }
+      }
+      for (const l of DEFAULT_SEED_DATA.access_links) {
+        if (!parsed.access_links.some((el) => el.id === l.id)) {
+          parsed.access_links.push(l);
+          updated = true;
+        }
+      }
+      if (updated) {
+        try {
+          fs.writeFileSync(storeFile, JSON.stringify(parsed, null, 2), 'utf-8');
+        } catch {
+          // ignore
+        }
+      }
+
       globalThis.__mediaStudioLocalStore = parsed;
       return parsed;
     }

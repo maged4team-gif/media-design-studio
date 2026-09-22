@@ -1,8 +1,10 @@
 import React from 'react';
 import Link from 'next/link';
-import { Tv, Shield, ArrowLeft, Sparkles, Film } from 'lucide-react';
+import { Tv, Shield, ArrowLeft, Sparkles, Film, Lock, AlertTriangle } from 'lucide-react';
 
 export default function RootHomePage() {
+  const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
+
   return (
     <div className="relative min-h-screen bg-studio-bg flex flex-col justify-between overflow-hidden">
       {/* Background ambient glowing spheres */}
@@ -26,7 +28,7 @@ export default function RootHomePage() {
 
           <Link
             href="/admin"
-            className="flex items-center gap-1.5 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3.5 py-1.5 text-xs font-semibold text-studio-gold hover:bg-amber-500/20 transition"
+            className="flex items-center gap-1.5 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3.5 py-1.5 text-xs font-semibold text-studio-gold hover:bg-amber-500/20 transition focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none"
           >
             <Shield className="h-3.5 w-3.5" />
             <span>لوحة الإدارة</span>
@@ -52,39 +54,72 @@ export default function RootHomePage() {
           بوابة خاصة وسريعة تتيح للعملاء استعراض باقات الجرافيك، مشاهدة الفواصل والشارات بدقة عالية، تدوين الملاحظات عند اللحظات الزمنية الدقيقة، واعتماد المخرجات فوراً.
         </p>
 
+        {/* Demo Mode Notice Banner (rendered only when NEXT_PUBLIC_DEMO_MODE === 'true') */}
+        {isDemoMode && (
+          <div className="mt-8 mx-auto max-w-xl rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-right">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 flex-shrink-0 text-amber-400 mt-0.5" />
+              <div>
+                <h2 className="text-xs font-bold text-amber-300">وضع العرض التجريبي مفعّل</h2>
+                <p className="mt-1 text-xs text-studio-text-secondary leading-relaxed">
+                  هذه الروابط معروضة لأغراض المعاينة والتطوير فقط. في بيئة الإنتاج الرسمية، يجب تعطيل وضع العرض التجريبي وتغيير كافة الروابط وكلمات المرور الخاصة بالعملاء.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Action cards */}
         <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl mx-auto">
-          {/* Client Demo Link */}
-          <Link
-            href="/p/x7K29AbC"
-            className="glass-card group flex flex-col items-center justify-center p-6 rounded-2xl border border-white/10 hover:border-studio-blue/50 text-center transition shadow-xl"
-          >
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-studio-blue/20 text-studio-blue-glow mb-3 group-hover:scale-110 transition">
-              <Film className="h-6 w-6" />
+          {/* Client Access Card: Demo when NEXT_PUBLIC_DEMO_MODE === 'true', Private Notice otherwise */}
+          {isDemoMode ? (
+            <Link
+              href="/p/x7K29AbC"
+              className="glass-card group flex flex-col items-center justify-center p-6 rounded-2xl border border-white/10 hover:border-studio-blue/50 text-center transition shadow-xl focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-studio-blue/20 text-studio-blue-glow mb-3 group-hover:scale-110 transition">
+                <Film className="h-6 w-6" />
+              </div>
+              <h2 className="text-sm font-bold text-white group-hover:text-studio-blue-glow transition">
+                معاينة العرض التجريبي
+              </h2>
+              <p className="mt-1 text-xs text-studio-text-muted">
+                استعراض مشاريع المعاينة المصرح بها
+              </p>
+              <span className="mt-4 flex items-center gap-1 text-xs font-semibold text-studio-blue-glow">
+                <span>فتح الرابط التجريبي</span>
+                <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-1 transition" />
+              </span>
+            </Link>
+          ) : (
+            <div className="glass-card flex flex-col items-center justify-center p-6 rounded-2xl border border-white/10 text-center shadow-xl">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-studio-blue/15 text-studio-blue-glow mb-3">
+                <Lock className="h-6 w-6" />
+              </div>
+              <h2 className="text-sm font-bold text-white">
+                بوابة العملاء الخاصة
+              </h2>
+              <p className="mt-1 text-xs text-studio-text-secondary leading-relaxed">
+                يتم الدخول إلى المشاريع عبر الروابط الخاصة المشفرة المرسلة لكل عميل
+              </p>
+              <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-studio-surface px-3 py-1 text-[11px] text-studio-text-muted border border-white/5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                <span>دخول مشفر وخاص</span>
+              </span>
             </div>
-            <h3 className="text-sm font-bold text-white group-hover:text-studio-blue-glow transition">
-              دخول العميل (رابط أحمد)
-            </h3>
-            <p className="mt-1 text-xs text-studio-text-muted">
-              استعراض المشاريع المصرح بها (كلمة المرور: 2580)
-            </p>
-            <span className="mt-4 flex items-center gap-1 text-xs font-semibold text-studio-blue-glow">
-              <span>فتح الرابط التجريبي</span>
-              <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-1 transition" />
-            </span>
-          </Link>
+          )}
 
           {/* Admin Login Link */}
           <Link
             href="/admin"
-            className="glass-card group flex flex-col items-center justify-center p-6 rounded-2xl border border-white/10 hover:border-amber-500/50 text-center transition shadow-xl"
+            className="glass-card group flex flex-col items-center justify-center p-6 rounded-2xl border border-white/10 hover:border-amber-500/50 text-center transition shadow-xl focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none"
           >
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/20 text-studio-gold mb-3 group-hover:scale-110 transition">
               <Shield className="h-6 w-6" />
             </div>
-            <h3 className="text-sm font-bold text-white group-hover:text-studio-gold transition">
+            <h2 className="text-sm font-bold text-white group-hover:text-studio-gold transition">
               لوحة تحكم الإدارة
-            </h3>
+            </h2>
             <p className="mt-1 text-xs text-studio-text-muted">
               إدارة المشاريع، رفع الملفات، وتوليد روابط العملاء
             </p>
