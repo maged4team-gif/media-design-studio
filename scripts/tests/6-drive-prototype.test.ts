@@ -18,6 +18,7 @@ import {
   resetAccessTokenCache,
   getValidAccessToken,
 } from '../../lib/drive/client';
+import { encrypt, decrypt } from '../../lib/drive/credentials-store';
 import { POST as initUploadHandler } from '../../app/api/admin/drive/upload/init/route';
 import { PUT as chunkUploadHandler } from '../../app/api/admin/drive/upload/chunk/route';
 import { POST as statusUploadHandler } from '../../app/api/admin/drive/upload/status/route';
@@ -92,7 +93,7 @@ async function runDrivePrototypeTests() {
   // =============================================================
   console.log('>>> 1. Testing OAuth 2.0 State Anti-CSRF Binding & Secret Protection...');
 
-  assert(isDriveConfigured() === true, 'isDriveConfigured returns true when environment credentials are set');
+  assert((await isDriveConfigured()) === true, 'isDriveConfigured returns true when environment credentials are set');
 
   const validState = generateOAuthState(mockAdminToken);
   assert(typeof validState === 'string' && validState.length > 30, 'generateOAuthState produces non-empty base64url string');
@@ -182,7 +183,7 @@ async function runDrivePrototypeTests() {
   process.env.GOOGLE_DRIVE_REFRESH_TOKEN = '1//test-persisted-storage-token-999';
   process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID = 'mock-persisted-root-folder-123';
 
-  assert(isDriveConfigured() === true, 'isDriveConfigured successfully validates runtime environment credentials');
+  assert((await isDriveConfigured()) === true, 'isDriveConfigured successfully validates runtime environment credentials');
   assert(
     process.env.GOOGLE_DRIVE_REFRESH_TOKEN === '1//test-persisted-storage-token-999',
     'Uses GOOGLE_DRIVE_REFRESH_TOKEN from runtime environment'
@@ -205,6 +206,24 @@ async function runDrivePrototypeTests() {
   const verifyRes = await verifyDriveConnection();
   assert(verifyRes.ok === true, 'verifyDriveConnection confirms usable live connection before declaring success');
   restoreFetch();
+
+  // Test AES-256-GCM Server-side Encryption & Decryption
+  const sampleSecret = '1//04test_google_oauth_refresh_token_secret_12345';
+  const encryptedPayload = encrypt(sampleSecret);
+  assert(Boolean(encryptedPayload.encrypted && encryptedPayload.iv && encryptedPayload.authTag), 'AES-256-GCM produces encrypted ciphertext, iv, and authTag');
+  assert(encryptedPayload.encrypted !== sampleSecret, 'Ciphertext strictly conceals original refresh token');
+  
+  const decryptedToken = decrypt(encryptedPayload);
+  assert(decryptedToken === sampleSecret, 'AES-256-GCM successfully decrypts ciphertext to exact original refresh token');
+
+  // Test Tamper resistance
+  let tamperDetected = false;
+  try {
+    decrypt({ ...encryptedPayload, authTag: '00112233445566778899aabbccddeeff' });
+  } catch {
+    tamperDetected = true;
+  }
+  assert(tamperDetected === true, 'AES-256-GCM strictly rejects tampered authTag');
 
   // Set memory credentials for remaining test sections
   process.env.GOOGLE_DRIVE_REFRESH_TOKEN = 'mock-refresh-token-for-test';

@@ -105,6 +105,16 @@ CREATE TABLE IF NOT EXISTS pending_storage_cleanups (
     CONSTRAINT unique_pending_cleanup_bucket_path UNIQUE (bucket_id, storage_path)
 );
 
+-- 8. Google Drive Credentials Table (Encrypted server-side persistent OAuth refresh token store)
+CREATE TABLE IF NOT EXISTS google_drive_credentials (
+    id VARCHAR(64) PRIMARY KEY DEFAULT 'primary',
+    encrypted_refresh_token TEXT NOT NULL,
+    iv TEXT NOT NULL,
+    auth_tag TEXT NOT NULL,
+    root_folder_id TEXT,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
 -- Indexes for optimal query performance
 CREATE INDEX IF NOT EXISTS idx_projects_is_visible ON projects(is_visible, is_archived);
 CREATE INDEX IF NOT EXISTS idx_projects_drive_folder_id ON projects(drive_folder_id);
@@ -123,6 +133,7 @@ ALTER TABLE access_link_projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE approvals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pending_storage_cleanups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE google_drive_credentials ENABLE ROW LEVEL SECURITY;
 
 -- Revoke direct access from public 'anon' and 'authenticated' roles
 REVOKE ALL ON TABLE projects FROM anon, authenticated;
@@ -132,6 +143,7 @@ REVOKE ALL ON TABLE access_link_projects FROM anon, authenticated;
 REVOKE ALL ON TABLE comments FROM anon, authenticated;
 REVOKE ALL ON TABLE approvals FROM anon, authenticated;
 REVOKE ALL ON TABLE pending_storage_cleanups FROM anon, authenticated;
+REVOKE ALL ON TABLE google_drive_credentials FROM anon, authenticated;
 
 -- Grant permissions strictly to service_role used by Next.js server operations
 GRANT ALL ON TABLE projects TO service_role;
@@ -141,6 +153,7 @@ GRANT ALL ON TABLE access_link_projects TO service_role;
 GRANT ALL ON TABLE comments TO service_role;
 GRANT ALL ON TABLE approvals TO service_role;
 GRANT ALL ON TABLE pending_storage_cleanups TO service_role;
+GRANT ALL ON TABLE google_drive_credentials TO service_role;
 
 -- Hardened atomic stored procedure for updating access links and project assignments
 CREATE OR REPLACE FUNCTION public.update_access_link_atomic(

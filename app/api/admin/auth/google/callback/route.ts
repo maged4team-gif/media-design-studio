@@ -4,10 +4,16 @@ import {
   verifyOAuthState,
   exchangeCodeForTokens,
   ensureArchiveRootFolder,
-  saveStoredDriveConfig,
   verifyDriveConnection,
   getOAuthRedirectUri,
+  resetAccessTokenCache,
+  getValidAccessToken,
 } from '@/lib/drive/client';
+import {
+  saveDriveCredentials,
+  updateDriveRootFolder,
+  resetCredentialsStoreCache,
+} from '@/lib/drive/credentials-store';
 
 export async function GET(req: Request) {
   const adminToken = extractCookieFromRequest(req, 'admin_session');
@@ -47,21 +53,27 @@ export async function GET(req: Request) {
       throw new Error('لم يقم Google بإرجاع refresh_token صالح. يرجى إلغاء إذن التطبيق وإعادة المحاولة مع تفعيل prompt: consent.');
     }
 
-    process.env.GOOGLE_DRIVE_REFRESH_TOKEN = tokens.refresh_token;
-    delete process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
+    // 2. Clear token caches to guarantee testing the stored refresh token directly
+    resetAccessTokenCache();
+    resetCredentialsStoreCache();
 
-    // 2. Automatically ensure root archive folder exists and verify usability
-    const rootFolderId = await ensureArchiveRootFolder();
-    process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID = rootFolderId;
-
-    // 3. Perform live sanity check before declaring success to admin
-    await verifyDriveConnection();
-
-    // 4. Safely persist credentials to server-side storage across restarts
-    saveStoredDriveConfig({
-      refresh_token: tokens.refresh_token,
-      root_folder_id: rootFolderId,
+    // 3. Immediately encrypt and save the new refresh_token in Supabase persistent store
+    await saveDriveCredentials({
+      refreshToken: tokens.refresh_token,
     });
+
+    // 4. Strictly test that the stored refresh_token can mint a fresh access token from Google
+    const testAccessToken = await getValidAccessToken({ forceRefresh: true });
+    if (!testAccessToken) {
+      throw new Error('فشل التحقق من صلاحية Refresh Token المخزن.');
+    }
+
+    // 5. Automatically ensure root archive folder exists and persist its ID in Supabase
+    const rootFolderId = await ensureArchiveRootFolder();
+    await updateDriveRootFolder(rootFolderId);
+
+    // 6. Perform live sanity check before declaring success to admin
+    await verifyDriveConnection();
 
     // Redirect to admin dashboard without exposing tokens in URL or logs
     return NextResponse.redirect(`${urlObj.origin}/admin?drive_connected=true`);

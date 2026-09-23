@@ -41,7 +41,7 @@ export async function POST(req: Request) {
 
     // 3. Block legacy direct asset uploads once Google Drive is configured.
     // Exception: Project cover images (projectId === 'covers') remain permitted so admins can set project covers.
-    if (isDriveConfigured() && projectId !== 'covers') {
+    if ((await isDriveConfigured()) && projectId !== 'covers') {
       return NextResponse.json(
         {
           error: 'Google Drive هو مخزن الملفات المعتمد حالياً. تم حظر مسار الرفع القديم لمنع تشتت الملفات.',
@@ -102,7 +102,7 @@ export async function POST(req: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
 
     // 6. Tier 1: Upload to Google Drive if configured (primary studio storage)
-    if (isDriveConfigured()) {
+    if (await isDriveConfigured()) {
       try {
         const rootFolderId = await ensureArchiveRootFolder();
         const driveResult = await uploadBufferToDrive({

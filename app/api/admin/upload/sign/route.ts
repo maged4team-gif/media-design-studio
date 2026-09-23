@@ -30,7 +30,7 @@ export async function POST(req: Request) {
   }
 
   // Block new uploads to legacy Supabase Storage once Google Drive is active
-  if (isDriveConfigured()) {
+  if (await isDriveConfigured()) {
     return NextResponse.json(
       { error: 'تم تفعيل Google Drive كمخزن وسائط أساسي. تم حظر الرفع الجديد إلى Supabase Storage.' },
       { status: 409 }

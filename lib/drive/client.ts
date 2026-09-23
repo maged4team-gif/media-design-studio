@@ -3,6 +3,11 @@ import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import {
+  getDriveCredentials,
+  updateDriveRootFolder,
+  resetCredentialsStoreCache,
+} from './credentials-store';
 
 /**
  * Google Drive API v3 Native Integration Client
@@ -111,6 +116,7 @@ let inMemoryAccessTokenExpiry = 0;
 export function resetAccessTokenCache(): void {
   inMemoryAccessToken = null;
   inMemoryAccessTokenExpiry = 0;
+  resetCredentialsStoreCache();
 }
 
 /**
@@ -210,9 +216,18 @@ export function saveStoredDriveConfig(config: { refresh_token: string; root_fold
 }
 
 /**
- * Validates whether Google Drive credentials are configured directly in runtime environment
+ * Validates whether Google Drive credentials are configured via Supabase persistent store or runtime environment
  */
-export function isDriveConfigured(): boolean {
+export async function isDriveConfigured(): Promise<boolean> {
+  const { clientId, clientSecret, refreshToken: envToken } = getRuntimeDriveConfig();
+  if (clientId && clientSecret && envToken) {
+    return true;
+  }
+  const stored = await getDriveCredentials();
+  return Boolean(clientId && clientSecret && stored?.refreshToken);
+}
+
+export function isDriveConfiguredSync(): boolean {
   const { clientId, clientSecret, refreshToken } = getRuntimeDriveConfig();
   return Boolean(clientId && clientSecret && refreshToken);
 }
@@ -450,10 +465,8 @@ export async function exchangeCodeForTokens(
     throw new Error(`OAUTH_EXCHANGE_FAILED: ${data.error_description || data.error || 'Failed to exchange code'}`);
   }
 
-  // Cache access token in memory
-  inMemoryAccessToken = data.access_token;
-  inMemoryAccessTokenExpiry = Date.now() + (data.expires_in - 300) * 1000;
-
+  // Do NOT populate in-memory access token cache here;
+  // let getValidAccessToken() strictly test the newly stored refresh token.
   return {
     refresh_token: data.refresh_token,
     access_token: data.access_token,
@@ -462,20 +475,24 @@ export async function exchangeCodeForTokens(
 }
 
 /**
- * Retrieves a valid access token using the stored refresh_token.
+ * Retrieves a valid access token using the stored refresh_token from Supabase persistent store.
  * Handles automatic renewal and invalid_grant errors.
  */
-export async function getValidAccessToken(): Promise<string> {
+export async function getValidAccessToken(options?: { forceRefresh?: boolean }): Promise<string> {
   const now = Date.now();
-  if (inMemoryAccessToken && inMemoryAccessTokenExpiry > now) {
+  if (!options?.forceRefresh && inMemoryAccessToken && inMemoryAccessTokenExpiry > now) {
     return inMemoryAccessToken;
   }
 
-  const { clientId, clientSecret, refreshToken } = getRuntimeDriveConfig();
+  const { clientId, clientSecret, refreshToken: envRefreshToken } = getRuntimeDriveConfig();
+
+  // Primary: Load decrypted credentials from Supabase persistent store
+  const storedCreds = await getDriveCredentials();
+  const refreshToken = storedCreds?.refreshToken || envRefreshToken;
 
   // Safe diagnostic logging (strictly Boolean, zero secret logging)
-  console.log("Drive refresh token configured:", Boolean(process.env.GOOGLE_DRIVE_REFRESH_TOKEN));
-  console.log("Drive root folder configured:", Boolean(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID));
+  console.log("Drive refresh token configured:", Boolean(refreshToken));
+  console.log("Drive root folder configured:", Boolean(storedCreds?.rootFolderId || process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID));
 
   if (!clientId || !clientSecret || !refreshToken) {
     throw new Error('CONFIG_ERROR: Google Drive credentials not fully configured.');
@@ -508,11 +525,12 @@ export async function getValidAccessToken(): Promise<string> {
 }
 
 /**
- * Ensures the root studio archive folder exists in Google Drive
+ * Ensures the root studio archive folder exists in Google Drive and updates Supabase
  */
 export async function ensureArchiveRootFolder(): Promise<string> {
   const token = await getValidAccessToken();
-  const { rootFolderId: customRootId } = getRuntimeDriveConfig();
+  const storedCreds = await getDriveCredentials();
+  const customRootId = storedCreds?.rootFolderId || process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
 
   if (customRootId && customRootId.trim()) {
     try {
@@ -541,8 +559,10 @@ export async function ensureArchiveRootFolder(): Promise<string> {
   if (searchRes.ok) {
     const searchData = await searchRes.json();
     if (searchData.files && searchData.files.length > 0) {
-      process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID = searchData.files[0].id;
-      return searchData.files[0].id;
+      const foundId = searchData.files[0].id;
+      await updateDriveRootFolder(foundId);
+      process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID = foundId;
+      return foundId;
     }
   }
 
@@ -566,6 +586,8 @@ export async function ensureArchiveRootFolder(): Promise<string> {
   }
 
   const newFolder = await createRes.json();
+  await updateDriveRootFolder(newFolder.id);
+  process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID = newFolder.id;
   return newFolder.id;
 }
 

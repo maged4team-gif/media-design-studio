@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAdminSession, extractCookieFromRequest } from '@/lib/auth/session';
-import { getRuntimeDriveConfig } from '@/lib/drive/client';
+import { isDriveConfigured } from '@/lib/drive/client';
+import { getDriveCredentials } from '@/lib/drive/credentials-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,10 +13,12 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'غير مصرح للوصول لهذه العملية' }, { status: 401 });
   }
 
-  const { refreshToken, rootFolderId } = getRuntimeDriveConfig();
+  const configured = await isDriveConfigured();
+  const creds = await getDriveCredentials();
+  const rootFolderId = creds?.rootFolderId || process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || null;
 
   return NextResponse.json({
-    configured: Boolean(refreshToken),
+    configured,
     root_folder_id: rootFolderId,
   });
 }

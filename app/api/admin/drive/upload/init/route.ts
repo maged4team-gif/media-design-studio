@@ -28,7 +28,7 @@ export async function POST(req: Request) {
   console.log("Drive refresh token configured:", Boolean(process.env.GOOGLE_DRIVE_REFRESH_TOKEN));
   console.log("Drive root folder configured:", Boolean(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID));
 
-  if (!isDriveConfigured()) {
+  if (!(await isDriveConfigured())) {
     return NextResponse.json(
       { error: 'حساب Google Drive غير مربوط بعد. يرجى ربط الحساب أولاً عبر لوحة الإدارة.' },
       { status: 503 }

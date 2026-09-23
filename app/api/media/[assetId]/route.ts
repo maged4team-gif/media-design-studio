@@ -60,7 +60,7 @@ export async function GET(req: Request, { params }: RouteProps) {
   // 2. Handle Thumbnail Requests strictly: NEVER stream full video file as a thumbnail
   if (isThumbnail) {
     // A. Check Google Drive stored assets (Images & Videos)
-    if (asset.drive_file_id && isDriveConfigured()) {
+    if (asset.drive_file_id && (await isDriveConfigured())) {
       // 1. Fetch fresh thumbnail via drive_file_id or thumbnail_url with fallback
       try {
         const thumbStream = await getDriveThumbnailStream(asset.drive_file_id, req.signal);
@@ -135,7 +135,7 @@ export async function GET(req: Request, { params }: RouteProps) {
 
   // 3. Google Drive Delivery (Primary Storage & Archive)
   if (asset.drive_file_id) {
-    if (!isDriveConfigured()) {
+    if (!(await isDriveConfigured())) {
       return NextResponse.json(
         { error: 'الملف محفوظ في Google Drive ولكن اعتمادات الربط غير مهيأة أو منتهية على الخادم.' },
         { status: 503 }
