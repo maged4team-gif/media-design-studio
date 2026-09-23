@@ -114,8 +114,41 @@ export function resetAccessTokenCache(): void {
 }
 
 /**
+ * Sanitizes environment variables: trims whitespace, removes surrounding quotes and internal carriage returns.
+ */
+export function cleanEnvString(val: string | undefined): string {
+  if (!val) return '';
+  let s = val.trim();
+  // Strip enclosing quotes
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    s = s.slice(1, -1).trim();
+  }
+  // Strip accidental newlines or trailing carriage returns
+  if (s.includes('\r')) {
+    s = s.replace(/\r/g, '');
+  }
+  if (s.includes('\n')) {
+    s = s.split('\n')[0].trim();
+  }
+  return s.trim();
+}
+
+/**
+ * Returns runtime environment variables strictly from process.env with sanitization.
+ * Never loads from disk or stale fallbacks in production runtime.
+ */
+export function getRuntimeDriveConfig() {
+  const clientId = cleanEnvString(process.env.GOOGLE_CLIENT_ID);
+  const clientSecret = cleanEnvString(process.env.GOOGLE_CLIENT_SECRET);
+  const refreshToken = cleanEnvString(process.env.GOOGLE_DRIVE_REFRESH_TOKEN);
+  const rootFolderId = cleanEnvString(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID);
+
+  return { clientId, clientSecret, refreshToken, rootFolderId };
+}
+
+/**
  * Loads stored Google Drive configuration from server disk if not present in process.env.
- * Ensures connection persistence across application restarts.
+ * Ensures connection persistence across application restarts for local tests.
  */
 export function loadStoredDriveConfig(): StoredDriveConfig | null {
   const candidateFiles = [
@@ -164,7 +197,7 @@ export function saveStoredDriveConfig(config: { refresh_token: string; root_fold
     if (!fs.existsSync(credsDir)) {
       fs.mkdirSync(credsDir, { recursive: true });
     }
-    const existing = loadStoredDriveConfig() || { refresh_token: config.refresh_token };
+    const existing = { refresh_token: config.refresh_token };
     const updated: StoredDriveConfig = {
       ...existing,
       ...config,
@@ -173,27 +206,14 @@ export function saveStoredDriveConfig(config: { refresh_token: string; root_fold
     fs.writeFileSync(credsFile, JSON.stringify(updated, null, 2), 'utf8');
   } catch (err: any) {
     console.warn('Warning: Could not write Google Drive credentials to disk (read-only filesystem):', err?.message);
-    // In serverless environments, disk writes may fail; in-memory environment variables are already populated.
   }
-}
-
-// Attempt immediate load of stored config at startup
-try {
-  loadStoredDriveConfig();
-} catch {
-  // Ignored in build / test environments without storage
 }
 
 /**
- * Validates whether Google Drive credentials are configured
+ * Validates whether Google Drive credentials are configured directly in runtime environment
  */
 export function isDriveConfigured(): boolean {
-  if (!process.env.GOOGLE_DRIVE_REFRESH_TOKEN) {
-    loadStoredDriveConfig();
-  }
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN;
+  const { clientId, clientSecret, refreshToken } = getRuntimeDriveConfig();
   return Boolean(clientId && clientSecret && refreshToken);
 }
 
@@ -380,7 +400,7 @@ export function getOAuthRedirectUri(req: Request): string {
  * Generates Google OAuth 2.0 authorization URL
  */
 export function getAuthorizationUrl(redirectUri: string, adminSessionToken: string): string {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const { clientId } = getRuntimeDriveConfig();
   if (!clientId) {
     throw new Error('CONFIG_ERROR: GOOGLE_CLIENT_ID is not configured in environment.');
   }
@@ -406,8 +426,7 @@ export async function exchangeCodeForTokens(
   code: string,
   redirectUri: string
 ): Promise<{ refresh_token?: string; access_token: string; expires_in: number }> {
-  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+  const { clientId, clientSecret } = getRuntimeDriveConfig();
 
   if (!clientId || !clientSecret) {
     const missing = [!clientId && 'GOOGLE_CLIENT_ID', !clientSecret && 'GOOGLE_CLIENT_SECRET'].filter(Boolean).join(' and ');
@@ -452,9 +471,11 @@ export async function getValidAccessToken(): Promise<string> {
     return inMemoryAccessToken;
   }
 
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN;
+  const { clientId, clientSecret, refreshToken } = getRuntimeDriveConfig();
+
+  // Safe diagnostic logging (strictly Boolean, zero secret logging)
+  console.log("Drive refresh token configured:", Boolean(process.env.GOOGLE_DRIVE_REFRESH_TOKEN));
+  console.log("Drive root folder configured:", Boolean(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID));
 
   if (!clientId || !clientSecret || !refreshToken) {
     throw new Error('CONFIG_ERROR: Google Drive credentials not fully configured.');
@@ -475,7 +496,7 @@ export async function getValidAccessToken(): Promise<string> {
   if (!res.ok) {
     if (data.error === 'invalid_grant') {
       throw new Error(
-        'INVALID_GRANT: Google Drive refresh token has expired or was revoked. In OAuth "Testing" mode, tokens expire after 7 days. Re-authorization via /api/admin/auth/google is required.'
+        'INVALID_GRANT: رمز Google Drive غير صالح أو تم إلغاؤه. أعد ربط Google Drive أو حدّث Refresh Token في بيئة التشغيل.'
       );
     }
     throw new Error(`TOKEN_REFRESH_FAILED: ${data.error_description || data.error || 'Failed to refresh token'}`);
@@ -491,7 +512,7 @@ export async function getValidAccessToken(): Promise<string> {
  */
 export async function ensureArchiveRootFolder(): Promise<string> {
   const token = await getValidAccessToken();
-  const customRootId = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
+  const { rootFolderId: customRootId } = getRuntimeDriveConfig();
 
   if (customRootId && customRootId.trim()) {
     try {

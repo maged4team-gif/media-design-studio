@@ -24,6 +24,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'غير مصرح للوصول لهذه العملية' }, { status: 401 });
   }
 
+  // Safe diagnostic logging (strictly Boolean, zero secret logging)
+  console.log("Drive refresh token configured:", Boolean(process.env.GOOGLE_DRIVE_REFRESH_TOKEN));
+  console.log("Drive root folder configured:", Boolean(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID));
+
   if (!isDriveConfigured()) {
     return NextResponse.json(
       { error: 'حساب Google Drive غير مربوط بعد. يرجى ربط الحساب أولاً عبر لوحة الإدارة.' },

@@ -76,7 +76,6 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
             setDriveBanner({
               type: 'success',
               message: 'تم ربط حساب Google Drive بنجاح وتجهيز مجلد الأرشيف!',
-              refreshToken: data.refresh_token,
               rootFolderId: data.root_folder_id,
             });
           })
@@ -248,26 +247,18 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
               </button>
             </div>
 
-            {driveBanner.refreshToken && (
+            {driveBanner.rootFolderId && (
               <div className="mt-3 pt-3 border-t border-emerald-500/20 text-xs text-emerald-200/90 flex flex-col gap-2">
                 <p className="text-[11px] text-emerald-400/90 font-medium">
-                  💡 للحفاظ على الربط دائمًا في Vercel عبر جميع السيرفرات دون الحاجة لإعادة الربط لاحقاً:
+                  معرّف مجلد الأرشيف (Root Folder ID):
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
-                    onClick={() => handleCopyText(driveBanner.refreshToken!, 'ref_token')}
+                    onClick={() => handleCopyText(driveBanner.rootFolderId!, 'root_folder')}
                     className="rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 px-3 py-1.5 text-xs text-white transition flex items-center gap-1.5"
                   >
-                    <span>{copiedKey === 'ref_token' ? 'تم النسخ ✓' : 'نسخ GOOGLE_DRIVE_REFRESH_TOKEN'}</span>
+                    <span>{copiedKey === 'root_folder' ? 'تم النسخ ✓' : 'نسخ GOOGLE_DRIVE_ROOT_FOLDER_ID'}</span>
                   </button>
-                  {driveBanner.rootFolderId && (
-                    <button
-                      onClick={() => handleCopyText(driveBanner.rootFolderId!, 'root_folder')}
-                      className="rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 px-3 py-1.5 text-xs text-white transition flex items-center gap-1.5"
-                    >
-                      <span>{copiedKey === 'root_folder' ? 'تم النسخ ✓' : 'نسخ GOOGLE_DRIVE_ROOT_FOLDER_ID'}</span>
-                    </button>
-                  )}
                 </div>
               </div>
             )}

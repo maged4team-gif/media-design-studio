@@ -164,7 +164,7 @@ export async function GET(req: Request, { params }: RouteProps) {
       return NextResponse.json(
         {
           error: isGrantError
-            ? 'انتهت صلاحية تفويض Google Drive (وضع الاختبار 7 أيام). يرجى من المدير إعادة التفويض عبر لوحة الإدارة.'
+            ? 'رمز Google Drive غير صالح أو تم إلغاؤه. أعد ربط Google Drive أو حدّث Refresh Token في بيئة التشغيل.'
             : 'تعذر الاتصال بـ Google Drive لبث الوسائط: يرجى التحقق من اتصال الخادم بالإنترنت وصلاحية الحساب.',
           details: streamErr?.message,
         },

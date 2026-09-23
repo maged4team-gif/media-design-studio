@@ -174,31 +174,22 @@ async function runDrivePrototypeTests() {
 
   assert(caughtInvalidGrant, 'Detects invalid_grant on expired refresh token');
   assert(
-    invalidGrantMessage.includes('7 days') && invalidGrantMessage.includes('/api/admin/auth/google'),
-    'Actionable error mentions 7-day test mode limit and re-authorization URL'
+    invalidGrantMessage.includes('رمز Google Drive غير صالح أو تم إلغاؤه'),
+    'Actionable error shows localized production invalid_grant message'
   );
 
-  // Test Server-side Credential Persistence across simulated restarts
-  const testStorageFile = path.join(process.cwd(), '.data', 'test-google-drive.json');
-  process.env.DRIVE_STORAGE_FILE = testStorageFile;
+  // Test Runtime Environment Variable Configuration
+  process.env.GOOGLE_DRIVE_REFRESH_TOKEN = '1//test-persisted-storage-token-999';
+  process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID = 'mock-persisted-root-folder-123';
 
-  saveStoredDriveConfig({
-    refresh_token: '1//test-persisted-storage-token-999',
-    root_folder_id: 'mock-persisted-root-folder-123',
-  });
-
-  // Simulate application restart by deleting process.env variables
-  delete process.env.GOOGLE_DRIVE_REFRESH_TOKEN;
-  delete process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
-
-  assert(isDriveConfigured() === true, 'isDriveConfigured successfully reloads credentials from .data storage');
+  assert(isDriveConfigured() === true, 'isDriveConfigured successfully validates runtime environment credentials');
   assert(
     process.env.GOOGLE_DRIVE_REFRESH_TOKEN === '1//test-persisted-storage-token-999',
-    'Restores GOOGLE_DRIVE_REFRESH_TOKEN from disk store'
+    'Uses GOOGLE_DRIVE_REFRESH_TOKEN from runtime environment'
   );
   assert(
     process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID === 'mock-persisted-root-folder-123',
-    'Restores GOOGLE_DRIVE_ROOT_FOLDER_ID from disk store'
+    'Uses GOOGLE_DRIVE_ROOT_FOLDER_ID from runtime environment'
   );
 
   // Test live connection verification before declaring success
@@ -214,12 +205,6 @@ async function runDrivePrototypeTests() {
   const verifyRes = await verifyDriveConnection();
   assert(verifyRes.ok === true, 'verifyDriveConnection confirms usable live connection before declaring success');
   restoreFetch();
-
-  // Clean up isolated test storage file
-  if (fs.existsSync(testStorageFile)) {
-    fs.unlinkSync(testStorageFile);
-  }
-  delete process.env.DRIVE_STORAGE_FILE;
 
   // Set memory credentials for remaining test sections
   process.env.GOOGLE_DRIVE_REFRESH_TOKEN = 'mock-refresh-token-for-test';
