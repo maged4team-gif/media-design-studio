@@ -705,10 +705,11 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
                         value={project.status || (project.is_archived ? 'archived' : 'new')}
                         onChange={(e) => handleUpdateStatus(project, e.target.value as ProjectStatus)}
                         disabled={updatingStatusId === project.id}
-                        className={`text-[11px] font-bold rounded-lg px-2.5 py-1 border transition appearance-none cursor-pointer pr-6 pl-2 outline-none focus:ring-1 focus:ring-studio-blue ${
+                        className={`text-[11px] font-bold rounded-lg pr-2.5 pl-6 py-1 border transition appearance-none cursor-pointer outline-none focus:ring-1 focus:ring-studio-blue bg-studio-surface ${
                           PROJECT_STATUS_COLORS[project.status || (project.is_archived ? 'archived' : 'new')]?.badge ||
-                          'bg-white/10 text-white border-white/20'
+                          'text-white border-white/20'
                         } ${updatingStatusId === project.id ? 'opacity-50 cursor-wait' : ''}`}
+                        style={{ colorScheme: 'dark' }}
                         title="تغيير حالة المشروع مباشرة"
                       >
                         {(Object.keys(PROJECT_STATUS_LABELS) as ProjectStatus[]).map((st) => (
@@ -717,7 +718,7 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
                           </option>
                         ))}
                       </select>
-                      <ChevronDown className="h-3 w-3 absolute right-2 pointer-events-none opacity-60" />
+                      <ChevronDown className="h-3 w-3 absolute left-2 pointer-events-none opacity-70 text-current" />
                     </div>
                   </div>
 
