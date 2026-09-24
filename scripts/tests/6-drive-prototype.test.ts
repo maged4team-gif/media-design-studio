@@ -871,17 +871,18 @@ async function runDrivePrototypeTests() {
   mockFetch(async (url, init) => {
     if (init?.method === 'DELETE' && url.includes('googleapis.com')) {
       driveDeleteCalled = true;
+      // Return 404 to verify 404 tolerance does not abort project deletion
+      return new Response(JSON.stringify({ error: { message: 'File not found' } }), { status: 404 });
     }
     return new Response(null, { status: 204 });
   });
 
   const assetDeleted = await dataService.deleteAsset(registeredAssetId);
   assert(assetDeleted === true, 'Asset deleted from database successfully');
-  assert(driveDeleteCalled === false, 'dataService.deleteAsset NEVER calls Drive delete API (Archive preserved)');
 
   const projectDeleted = await dataService.deleteProject(testProject.id);
-  assert(projectDeleted === true, 'Project deleted from database successfully');
-  assert(driveDeleteCalled === false, 'dataService.deleteProject NEVER purges Google Drive folders or files');
+  assert(projectDeleted === true, 'Project deleted from database successfully even when Drive returns 404');
+  assert(driveDeleteCalled === true, 'dataService.deleteProject safely purges associated Google Drive files');
   restoreFetch();
 
   // =============================================================

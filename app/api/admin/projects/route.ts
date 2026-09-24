@@ -55,3 +55,38 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error?.message || 'تعذر إنشاء المشروع' }, { status: 500 });
   }
 }
+
+export async function DELETE(req: Request) {
+  if (!verifyRequestOrigin(req)) {
+    return NextResponse.json({ error: 'طلب غير مصرح به (CSRF Mismatch)' }, { status: 403 });
+  }
+
+  const adminToken = extractCookieFromRequest(req, 'admin_session');
+  const isAdmin = await getAdminSession(adminToken);
+  if (!isAdmin) {
+    return NextResponse.json({ error: 'غير مصرح للوصول لهذه العملية' }, { status: 401 });
+  }
+
+  try {
+    const body = await req.json();
+    const projectIds = Array.isArray(body?.projectIds)
+      ? (body.projectIds as unknown[]).filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
+      : [];
+
+    if (projectIds.length === 0) {
+      return NextResponse.json({ error: 'يرجى تحديد مشروع واحد على الأقل للحذف' }, { status: 400 });
+    }
+
+    const result = await dataService.deleteProjectsBatch(projectIds);
+    return NextResponse.json({
+      success: true,
+      deletedCount: result.deletedCount,
+      totalAssetsDeleted: result.totalAssetsDeleted,
+      failedIds: result.failedIds,
+    });
+  } catch (error: any) {
+    console.error('Batch delete projects error:', error);
+    return NextResponse.json({ error: error?.message || 'تعذر حذف المشاريع المحددة' }, { status: 500 });
+  }
+}
+

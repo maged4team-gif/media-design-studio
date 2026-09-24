@@ -24,6 +24,8 @@ import {
   User,
   Globe,
   Lock,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 
 interface AdminProjectsViewProps {
@@ -55,6 +57,16 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
   } | null>(null);
   const [sharingProject, setSharingProject] = useState<Project | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Batch & Safe Delete State
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [deleteModalProjects, setDeleteModalProjects] = useState<Project[] | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [actionBanner, setActionBanner] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const handleCopyText = async (text: string, key: string) => {
     try {
@@ -168,19 +180,78 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
     }
   };
 
-  // Delete Project
-  const handleDeleteProject = async (id: string, title: string) => {
-    if (!confirm(`هل أنت متأكد من حذف المشروع "${title}" وجميع ملفاته؟`)) return;
-
-    const res = await fetch(`/api/admin/projects/${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      setProjects((prev) => prev.filter((p) => p.id !== id));
-    }
-  };
-
   const displayedProjects = projects.filter((p) =>
     filterArchived ? p.is_archived : !p.is_archived
   );
+
+  const allDisplayedSelected =
+    displayedProjects.length > 0 &&
+    displayedProjects.every((p) => selectedProjectIds.includes(p.id));
+
+  const handleToggleSelectAll = () => {
+    if (allDisplayedSelected) {
+      const displayedIds = new Set(displayedProjects.map((p) => p.id));
+      setSelectedProjectIds((prev) => prev.filter((id) => !displayedIds.has(id)));
+    } else {
+      const combined = new Set([...selectedProjectIds, ...displayedProjects.map((p) => p.id)]);
+      setSelectedProjectIds(Array.from(combined));
+    }
+  };
+
+  const handleToggleSelect = (projectId: string) => {
+    setSelectedProjectIds((prev) =>
+      prev.includes(projectId) ? prev.filter((id) => id !== projectId) : [...prev, projectId]
+    );
+  };
+
+  // Trigger individual deletion via safe modal
+  const handlePromptDeleteSingle = (project: Project) => {
+    setDeleteError(null);
+    setDeleteModalProjects([project]);
+  };
+
+  // Trigger batch deletion via safe modal
+  const handlePromptDeleteBatch = () => {
+    setDeleteError(null);
+    const selectedProjs = projects.filter((p) => selectedProjectIds.includes(p.id));
+    if (selectedProjs.length > 0) {
+      setDeleteModalProjects(selectedProjs);
+    }
+  };
+
+  // Execute deletion (single or batch)
+  const handleExecuteDelete = async () => {
+    if (!deleteModalProjects || deleteModalProjects.length === 0) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    const idsToDelete = deleteModalProjects.map((p) => p.id);
+
+    try {
+      const res = await fetch('/api/admin/projects', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectIds: idsToDelete }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'تعذر إتمام عملية الحذف');
+      }
+
+      setProjects((prev) => prev.filter((p) => !idsToDelete.includes(p.id)));
+      setSelectedProjectIds((prev) => prev.filter((id) => !idsToDelete.includes(id)));
+      setDeleteModalProjects(null);
+      setActionBanner({
+        type: 'success',
+        message: `تم بنجاح حذف ${data.deletedCount ?? idsToDelete.length} مشروع وتنظيف ${data.totalAssetsDeleted ?? 0} ملف من قاعدة البيانات ومحاولة إزالتها من Google Drive.`,
+      });
+    } catch (err: any) {
+      setDeleteError(err?.message || 'حدث خطأ أثناء محاولة الحذف');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-studio-bg flex flex-col">
@@ -265,6 +336,33 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
           </div>
         )}
 
+        {/* Action Banner (Delete / Operations Feedback) */}
+        {actionBanner && (
+          <div
+            className={`mb-6 flex items-center justify-between gap-3 rounded-2xl border p-4 text-xs font-semibold animate-fade-in ${
+              actionBanner.type === 'success'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                : 'border-red-500/30 bg-red-500/10 text-red-300'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              {actionBanner.type === 'success' ? (
+                <CheckCircle2 className="h-5 w-5 text-emerald-400 flex-shrink-0" />
+              ) : (
+                <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0" />
+              )}
+              <span>{actionBanner.message}</span>
+            </div>
+            <button
+              onClick={() => setActionBanner(null)}
+              className="rounded-lg p-1 text-white/50 hover:text-white transition"
+              title="إغلاق"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* Header toolbar */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
           <div>
@@ -274,7 +372,35 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {displayedProjects.length > 0 && (
+              <button
+                type="button"
+                onClick={handleToggleSelectAll}
+                className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold border transition ${
+                  allDisplayedSelected
+                    ? 'border-studio-blue/50 bg-studio-blue/20 text-studio-blue-glow'
+                    : 'border-white/10 bg-studio-surface text-studio-text-secondary hover:text-white'
+                }`}
+                title={allDisplayedSelected ? 'إلغاء تحديد جميع المشاريع' : 'تحديد جميع المشاريع'}
+              >
+                <CheckSquare className="h-4 w-4" />
+                <span>{allDisplayedSelected ? 'إلغاء تحديد الكل' : 'تحديد الكل'}</span>
+              </button>
+            )}
+
+            {selectedProjectIds.length > 0 && (
+              <button
+                type="button"
+                onClick={handlePromptDeleteBatch}
+                className="flex items-center gap-2 rounded-xl bg-red-600 hover:bg-red-500 px-3.5 py-2 text-xs font-bold text-white transition shadow-lg shadow-red-600/30 animate-fade-in"
+                title="حذف جميع المشاريع المحددة"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>حذف المشاريع المحددة ({selectedProjectIds.length})</span>
+              </button>
+            )}
+
             <button
               onClick={() => setFilterArchived(!filterArchived)}
               className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold border transition ${
@@ -300,58 +426,83 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
         {/* Projects Cards Grid */}
         {displayedProjects.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {displayedProjects.map((project) => (
-              <div
-                key={project.id}
-                className={`glass-card flex flex-col overflow-hidden rounded-2xl border transition ${
-                  !project.is_visible
-                    ? 'border-dashed border-red-500/30 opacity-75'
-                    : 'border-white/10'
-                }`}
-              >
-                {/* Cover Thumbnail */}
-                <div className="relative aspect-video w-full overflow-hidden bg-studio-surface">
-                  {project.cover_url ? (
-                    <img
-                      src={
-                        project.display_cover_url ||
-                        (project.cover_url?.startsWith('http') || project.cover_url?.startsWith('/uploads/')
-                          ? project.cover_url
-                          : `/api/media/cover/${project.id}`)
-                      }
-                      alt={project.title}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-studio-surface text-studio-text-muted">
-                      <FolderKanban className="h-10 w-10 opacity-30" />
-                    </div>
-                  )}
+            {displayedProjects.map((project) => {
+              const isSelected = selectedProjectIds.includes(project.id);
+              return (
+                <div
+                  key={project.id}
+                  className={`glass-card flex flex-col overflow-hidden rounded-2xl border transition ${
+                    isSelected
+                      ? 'border-studio-blue ring-2 ring-studio-blue/50 bg-studio-blue/[0.04]'
+                      : !project.is_visible
+                      ? 'border-dashed border-red-500/30 opacity-75'
+                      : 'border-white/10'
+                  }`}
+                >
+                  {/* Cover Thumbnail */}
+                  <div className="relative aspect-video w-full overflow-hidden bg-studio-surface">
+                    {project.cover_url ? (
+                      <img
+                        src={
+                          project.display_cover_url ||
+                          (project.cover_url?.startsWith('http') || project.cover_url?.startsWith('/uploads/')
+                            ? project.cover_url
+                            : `/api/media/cover/${project.id}`)
+                        }
+                        alt={project.title}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-studio-surface text-studio-text-muted">
+                        <FolderKanban className="h-10 w-10 opacity-30" />
+                      </div>
+                    )}
 
-                  {/* Category */}
-                  {project.category && (
-                    <div className="absolute top-3 right-3 rounded-md bg-black/70 px-2.5 py-1 text-[11px] font-medium text-studio-gold backdrop-blur-md border border-white/10">
-                      {project.category}
+                    {/* Checkbox and Category overlay */}
+                    <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
+                      {project.category && (
+                        <div className="rounded-md bg-black/70 px-2.5 py-1 text-[11px] font-medium text-studio-gold backdrop-blur-md border border-white/10">
+                          {project.category}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleSelect(project.id);
+                        }}
+                        className={`flex h-7 w-7 items-center justify-center rounded-lg border transition backdrop-blur-md ${
+                          isSelected
+                            ? 'border-studio-blue bg-studio-blue text-white shadow-md shadow-studio-blue/40'
+                            : 'border-white/20 bg-black/60 text-white/60 hover:border-white/40 hover:text-white'
+                        }`}
+                        title={isSelected ? 'إلغاء تحديد المشروع' : 'تحديد المشروع'}
+                      >
+                        {isSelected ? (
+                          <CheckSquare className="h-4 w-4" />
+                        ) : (
+                          <Square className="h-4 w-4" />
+                        )}
+                      </button>
                     </div>
-                  )}
 
-                  {/* Visibility Status Badge */}
-                  <div className="absolute top-3 left-3">
-                    <button
-                      type="button"
-                      onClick={() => handleToggleVisibility(project)}
-                      className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold backdrop-blur-md border ${
-                        project.is_visible
-                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                          : 'bg-red-500/20 text-red-400 border-red-500/30'
-                      }`}
-                      title="تبديل ظهور المشروع للعميل"
-                    >
-                      {project.is_visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
-                      <span>{project.is_visible ? 'ظاهر للعميل' : 'مخفي عن العميل'}</span>
-                    </button>
+                    {/* Visibility Status Badge */}
+                    <div className="absolute top-3 left-3 z-10">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleVisibility(project)}
+                        className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold backdrop-blur-md border ${
+                          project.is_visible
+                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                            : 'bg-red-500/20 text-red-400 border-red-500/30'
+                        }`}
+                        title="تبديل ظهور المشروع للعميل"
+                      >
+                        {project.is_visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                        <span>{project.is_visible ? 'ظاهر للعميل' : 'مخفي عن العميل'}</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
 
                 {/* Content */}
                 <div className="flex flex-1 flex-col p-5">
@@ -533,7 +684,7 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
                       {/* Delete */}
                       <button
                         type="button"
-                        onClick={() => handleDeleteProject(project.id, project.title)}
+                        onClick={() => handlePromptDeleteSingle(project)}
                         className="rounded-lg p-2 text-studio-text-muted hover:bg-red-500/10 hover:text-red-400 transition"
                         title="حذف المشروع"
                       >
@@ -543,7 +694,8 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
                   </div>
                 </div>
               </div>
-            ))}
+            );
+          })}
           </div>
         ) : (
           <div className="flex min-h-[350px] flex-col items-center justify-center rounded-2xl border border-white/5 bg-studio-surface/40 p-8 text-center">
@@ -728,6 +880,132 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
                   className="rounded-xl bg-white/5 px-4 py-2 text-xs font-semibold text-studio-text hover:bg-white/10 transition"
                 >
                   إغلاق
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: تأكيد حذف المشاريع (فردي أو جماعي) */}
+        {deleteModalProjects && deleteModalProjects.length > 0 && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md animate-fade-in">
+            <div className="w-full max-w-lg rounded-2xl border border-red-500/30 bg-studio-surface p-6 shadow-2xl space-y-5">
+              <div className="flex items-start justify-between border-b border-white/10 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/10 border border-red-500/20 text-red-400">
+                    <Trash2 className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-white">
+                      {deleteModalProjects.length === 1
+                        ? 'تأكيد حذف المشروع'
+                        : `تأكيد حذف ${deleteModalProjects.length} مشاريع محددة`}
+                    </h3>
+                    <p className="mt-0.5 text-xs text-studio-text-secondary">
+                      يرجى مراجعة التفاصيل أدناه قبل تأكيد الحذف النهائي
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={() => {
+                    if (!isDeleting) {
+                      setDeleteModalProjects(null);
+                      setDeleteError(null);
+                    }
+                  }}
+                  className="rounded-lg p-1.5 text-studio-text-muted hover:bg-white/5 hover:text-white transition disabled:opacity-50"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Details Box */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl border border-white/5 bg-studio-card/80 p-3 text-center">
+                  <span className="text-[11px] text-studio-text-muted block">عدد المشاريع</span>
+                  <span className="text-lg font-mono font-bold text-white mt-1 block">
+                    {deleteModalProjects.length}
+                  </span>
+                </div>
+                <div className="rounded-xl border border-white/5 bg-studio-card/80 p-3 text-center">
+                  <span className="text-[11px] text-studio-text-muted block">إجمالي الملفات المرتبطة</span>
+                  <span className="text-lg font-mono font-bold text-studio-gold mt-1 block">
+                    {deleteModalProjects.reduce((sum, p) => sum + (p.file_count || 0), 0)} ملف
+                  </span>
+                </div>
+              </div>
+
+              {/* Projects List Preview */}
+              <div className="space-y-1.5">
+                <span className="text-xs font-semibold text-studio-text-secondary block">
+                  المشاريع التي سيتم حذفها:
+                </span>
+                <div className="max-h-36 overflow-y-auto space-y-1.5 rounded-xl border border-white/5 bg-studio-card/50 p-2.5">
+                  {deleteModalProjects.map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2 text-xs"
+                    >
+                      <span className="font-semibold text-white line-clamp-1 flex-1 ml-2">
+                        {p.title}
+                      </span>
+                      <span className="rounded bg-white/5 px-2 py-0.5 text-[11px] font-mono text-studio-text-muted whitespace-nowrap">
+                        {p.file_count || 0} ملف
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Warning Box */}
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-xs text-red-300 flex items-start gap-2.5">
+                <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold">تنبيه أمان وهيكلية البيانات:</p>
+                  <p className="text-[11px] text-red-200/90 leading-relaxed">
+                    سيتم حذف سجلات المشاريع، الروابط، اعتمادات العميل والملاحظات من قاعدة البيانات بالترتيب الآمن، ومحاولة تنظيف وحذف الملفات والمجلدات المرتبطة من Google Drive تلقائياً مع حماية مجلد الأرشيف الرئيسي والمجلدات المشتركة.
+                  </p>
+                </div>
+              </div>
+
+              {deleteError && (
+                <div className="rounded-xl border border-red-500/40 bg-red-500/15 p-3 text-xs text-red-300">
+                  {deleteError}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={handleExecuteDelete}
+                  className="flex-1 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 py-2.5 text-xs font-bold text-white transition flex items-center justify-center gap-2 shadow-lg shadow-red-600/30"
+                >
+                  {isDeleting ? (
+                    <>
+                      <span className="h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>جاري الحذف وتنظيف Drive...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-4 w-4" />
+                      <span>تأكيد الحذف النهائي</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={() => {
+                    setDeleteModalProjects(null);
+                    setDeleteError(null);
+                  }}
+                  className="rounded-xl border border-white/10 bg-studio-surface hover:bg-white/5 px-4 py-2.5 text-xs font-semibold text-studio-text-secondary hover:text-white transition disabled:opacity-50"
+                >
+                  إلغاء
                 </button>
               </div>
             </div>

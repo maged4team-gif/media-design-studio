@@ -3,6 +3,7 @@ import { getServerSupabase, isServerSupabaseConfigured, isSupabaseHealthy, repor
 import { Project, Asset, AccessLink, Comment, Approval, StudioNotification } from '@/lib/supabase/database.types';
 import bcrypt from 'bcryptjs';
 import { generateSlug } from '@/lib/utils/slug';
+import { deleteDriveFileOrFolder } from '@/lib/drive/client';
 import fs from 'fs';
 import path from 'path';
 
@@ -1681,44 +1682,173 @@ export const dataService = {
 
   async deleteProject(id: string): Promise<boolean> {
     const supabase = getServerSupabase();
+    let projectDriveFolderId: string | null = null;
+    let projectCoverDriveFileId: string | null = null;
+    const assetDriveFileIds: string[] = [];
+    const assetIds: string[] = [];
+    const pathsToDelete: string[] = [];
+
     if (supabase) {
       try {
         const { data: project } = await supabase
           .from('projects')
-          .select('cover_storage_path, cover_url')
+          .select('id, title, cover_storage_path, cover_url, drive_folder_id, drive_cover_file_id')
           .eq('id', id)
           .maybeSingle();
 
+        if (project) {
+          if (project.drive_folder_id) projectDriveFolderId = project.drive_folder_id;
+          if (project.drive_cover_file_id) projectCoverDriveFileId = project.drive_cover_file_id;
+          if (project.cover_storage_path) pathsToDelete.push(project.cover_storage_path);
+        }
+
         const { data: assets } = await supabase
           .from('assets')
-          .select('storage_path, thumbnail_storage_path, thumbnail_url')
+          .select('id, drive_file_id, storage_path, thumbnail_storage_path, thumbnail_url')
           .eq('project_id', id);
 
-        const pathsToDelete: string[] = [];
-        if (project?.cover_storage_path) pathsToDelete.push(project.cover_storage_path);
-        if (assets) {
+        if (assets && assets.length > 0) {
           for (const a of assets) {
+            assetIds.push(a.id);
+            if (a.drive_file_id) assetDriveFileIds.push(a.drive_file_id);
             if (a.storage_path) pathsToDelete.push(a.storage_path);
             if (a.thumbnail_storage_path) pathsToDelete.push(a.thumbnail_storage_path);
           }
         }
+      } catch (err: any) {
+        console.warn('[Supabase Exception] deleteProject querying items:', err?.message || err);
+      }
+    }
 
-        if (pathsToDelete.length > 0) {
+    // Also check local store & project settings map for fallback/hybrid IDs
+    const store = getLocalStore();
+    const localProj = store.projects.find((p) => p.id === id);
+    if (localProj) {
+      if (!projectDriveFolderId && localProj.drive_folder_id) projectDriveFolderId = localProj.drive_folder_id;
+      if (!projectCoverDriveFileId && localProj.drive_cover_file_id) projectCoverDriveFileId = localProj.drive_cover_file_id;
+      if (localProj.cover_storage_path) pathsToDelete.push(localProj.cover_storage_path);
+    }
+    const projectSettings = getProjectSettingsMap()[id];
+    if (projectSettings) {
+      if (!projectDriveFolderId && projectSettings.drive_folder_id) projectDriveFolderId = projectSettings.drive_folder_id;
+      if (!projectCoverDriveFileId && projectSettings.drive_cover_file_id) projectCoverDriveFileId = projectSettings.drive_cover_file_id;
+    }
+
+    const localAssets = store.assets.filter((a) => a.project_id === id);
+    for (const la of localAssets) {
+      if (!assetIds.includes(la.id)) assetIds.push(la.id);
+      if (la.drive_file_id && !assetDriveFileIds.includes(la.drive_file_id)) assetDriveFileIds.push(la.drive_file_id);
+      if (la.storage_path) pathsToDelete.push(la.storage_path);
+      if (la.thumbnail_storage_path) pathsToDelete.push(la.thumbnail_storage_path);
+    }
+
+    const driveMap = getAssetDriveMap();
+    for (const [aId, dMap] of Object.entries(driveMap)) {
+      if (assetIds.includes(aId) && dMap.drive_file_id && !assetDriveFileIds.includes(dMap.drive_file_id)) {
+        assetDriveFileIds.push(dMap.drive_file_id);
+      }
+    }
+
+    // 1. Delete associated files from Google Drive (resilient: 404 treated as success, errors caught)
+    for (const driveFileId of assetDriveFileIds) {
+      try {
+        await deleteDriveFileOrFolder(driveFileId);
+      } catch (e: any) {
+        console.warn(`[Drive Error] Failed to delete asset drive file ${driveFileId}:`, e?.message || e);
+      }
+    }
+
+    if (projectCoverDriveFileId) {
+      try {
+        await deleteDriveFileOrFolder(projectCoverDriveFileId);
+      } catch (e: any) {
+        console.warn(`[Drive Error] Failed to delete cover drive file ${projectCoverDriveFileId}:`, e?.message || e);
+      }
+    }
+
+    // Project folder deletion with safety guard:
+    // Ensure it is NOT shared with ANY OTHER project in Supabase or localStore
+    if (projectDriveFolderId) {
+      let isSharedFolder = false;
+      if (supabase) {
+        try {
+          const { data: shared } = await supabase
+            .from('projects')
+            .select('id')
+            .eq('drive_folder_id', projectDriveFolderId)
+            .neq('id', id)
+            .limit(1);
+          if (shared && shared.length > 0) {
+            isSharedFolder = true;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (!isSharedFolder) {
+        if (store.projects.some((p) => p.id !== id && p.drive_folder_id === projectDriveFolderId)) {
+          isSharedFolder = true;
+        }
+      }
+
+      if (!isSharedFolder) {
+        try {
+          await deleteDriveFileOrFolder(projectDriveFolderId, { isFolder: true });
+        } catch (e: any) {
+          console.warn(`[Drive Error] Failed to delete project folder ${projectDriveFolderId}:`, e?.message || e);
+        }
+      } else {
+        console.log(`[Drive Safety] Skipping folder ${projectDriveFolderId} deletion as it is shared by other projects.`);
+      }
+    }
+
+    // Delete Supabase storage objects if any
+    if (supabase && pathsToDelete.length > 0) {
+      try {
+        await supabase.storage.from('media-studio-assets').remove(pathsToDelete);
+      } catch {
+        // ignore
+      }
+    }
+
+    // 2. Ordered Database Cleanup in Supabase:
+    // approvals -> comments -> assets -> access_link_projects -> projects
+    if (supabase) {
+      try {
+        if (assetIds.length > 0) {
+          // 1. approvals
           try {
-            await supabase.storage.from('media-studio-assets').remove(pathsToDelete);
-          } catch {
-            // ignore
+            await supabase.from('approvals').delete().in('asset_id', assetIds);
+          } catch (e) {
+            console.warn('[Supabase Cleanup] Failed deleting approvals:', e);
+          }
+
+          // 2. comments
+          try {
+            await supabase.from('comments').delete().in('asset_id', assetIds);
+          } catch (e) {
+            console.warn('[Supabase Cleanup] Failed deleting comments:', e);
+          }
+
+          // 3. assets
+          try {
+            await supabase.from('assets').delete().eq('project_id', id);
+          } catch (e) {
+            console.warn('[Supabase Cleanup] Failed deleting assets:', e);
           }
         }
 
+        // 4. access_link_projects
+        try {
+          await supabase.from('access_link_projects').delete().eq('project_id', id);
+        } catch (e) {
+          console.warn('[Supabase Cleanup] Failed deleting access_link_projects:', e);
+        }
+
+        // 5. projects
         const { error: delErr } = await supabase.from('projects').delete().eq('id', id);
         if (!delErr) {
           reportSupabaseSuccess();
-          const store = getLocalStore();
-          store.projects = store.projects.filter((p) => p.id !== id);
-          store.assets = store.assets.filter((a) => a.project_id !== id);
-          saveLocalStore(store);
-          return true;
         } else {
           reportSupabaseFailure(delErr);
           console.warn('[Supabase Warning] deleteProject failed:', delErr.message);
@@ -1729,14 +1859,60 @@ export const dataService = {
       }
     }
 
-    const store = getLocalStore();
+    // Clean localStore & maps
     store.projects = store.projects.filter((p) => p.id !== id);
     store.assets = store.assets.filter((a) => a.project_id !== id);
+    if (assetIds.length > 0) {
+      store.comments = store.comments.filter((c) => !assetIds.includes(c.asset_id));
+      store.approvals = store.approvals.filter((app) => !assetIds.includes(app.asset_id));
+    }
     store.access_links.forEach((link) => {
       link.project_ids = (link.project_ids || []).filter((pId) => pId !== id);
     });
     saveLocalStore(store);
+
+    for (const aId of assetIds) {
+      removeAssetDriveMapping(aId);
+    }
+
     return true;
+  },
+
+  async deleteProjectsBatch(projectIds: string[]): Promise<{
+    success: boolean;
+    deletedCount: number;
+    totalAssetsDeleted: number;
+    failedIds: string[];
+  }> {
+    const uniqueIds = Array.from(new Set(projectIds.filter((p) => typeof p === 'string' && p.trim())));
+    let deletedCount = 0;
+    let totalAssetsDeleted = 0;
+    const failedIds: string[] = [];
+
+    for (const id of uniqueIds) {
+      try {
+        const assets = await this.getAssetsForProject(id, false).catch(() => []);
+        const assetCount = assets.length;
+
+        const ok = await this.deleteProject(id);
+        if (ok) {
+          deletedCount++;
+          totalAssetsDeleted += assetCount;
+        } else {
+          failedIds.push(id);
+        }
+      } catch (err) {
+        console.error(`Error deleting project ${id} in batch:`, err);
+        failedIds.push(id);
+      }
+    }
+
+    return {
+      success: failedIds.length === 0,
+      deletedCount,
+      totalAssetsDeleted,
+      failedIds,
+    };
   },
 
   // -------------------------------------------------------------
@@ -1921,6 +2097,18 @@ export const dataService = {
               // ignore
             }
           }
+        }
+
+        // Clean dependent approvals and comments first
+        try {
+          await supabase.from('approvals').delete().eq('asset_id', id);
+        } catch {
+          // ignore
+        }
+        try {
+          await supabase.from('comments').delete().eq('asset_id', id);
+        } catch {
+          // ignore
         }
 
         const { error: delErr } = await supabase.from('assets').delete().eq('id', id);

@@ -1026,3 +1026,93 @@ export async function streamFile(
     body: res.body,
   };
 }
+
+/**
+ * Safely deletes a file or folder from Google Drive by its ID.
+ * Tolerant to:
+ * - 404 Not Found (item already deleted or does not exist) -> treated as success / no-op
+ * - Network/Token errors -> caught and logged, returns { success: false, error } without throwing
+ * 
+ * Safety Guards:
+ * - NEVER deletes the root archive folder ('Media Studio Archive' or GOOGLE_DRIVE_ROOT_FOLDER_ID)
+ * - Checks folder name if isFolder is true to ensure it is not 'Media Studio Archive'
+ */
+export async function deleteDriveFileOrFolder(
+  fileOrFolderId: string | null | undefined,
+  options?: {
+    isFolder?: boolean;
+    safeRootFolderId?: string;
+  }
+): Promise<{ success: boolean; notFound?: boolean; error?: string }> {
+  if (!fileOrFolderId || typeof fileOrFolderId !== 'string' || !fileOrFolderId.trim()) {
+    return { success: true, notFound: true };
+  }
+
+  const cleanId = fileOrFolderId.trim();
+
+  // Root folder protection
+  try {
+    const storedCreds = await getDriveCredentials().catch(() => null);
+    const rootId = (
+      options?.safeRootFolderId ||
+      storedCreds?.rootFolderId ||
+      process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID ||
+      ''
+    ).trim();
+
+    if (rootId && cleanId === rootId) {
+      console.warn(`[Drive Guard] Blocked attempt to delete root archive folder: ${cleanId}`);
+      return { success: false, error: 'Cannot delete root archive folder' };
+    }
+  } catch {
+    // Proceed with check
+  }
+
+  try {
+    const token = await getValidAccessToken();
+
+    // Extra guard if isFolder: verify it's not named 'Media Studio Archive'
+    if (options?.isFolder) {
+      try {
+        const metaRes = await fetch(`${DRIVE_API_BASE}/files/${encodeURIComponent(cleanId)}?fields=id,name,mimeType`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (metaRes.status === 404) {
+          return { success: true, notFound: true };
+        }
+        if (metaRes.ok) {
+          const meta = await metaRes.json();
+          if (meta.name === 'Media Studio Archive') {
+            console.warn(`[Drive Guard] Blocked attempt to delete folder named 'Media Studio Archive': ${cleanId}`);
+            return { success: false, error: 'Cannot delete root archive folder' };
+          }
+        }
+      } catch {
+        // If meta check fails, continue
+      }
+    }
+
+    const res = await fetch(`${DRIVE_API_BASE}/files/${encodeURIComponent(cleanId)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (res.status === 204 || res.status === 200) {
+      return { success: true };
+    }
+
+    if (res.status === 404) {
+      // Item does not exist on Drive (treated as successfully deleted)
+      return { success: true, notFound: true };
+    }
+
+    const errData = await res.json().catch(() => ({}));
+    const errMsg = errData.error?.message || `HTTP ${res.status}`;
+    console.warn(`[Drive Warning] deleteDriveFileOrFolder (${cleanId}) returned ${res.status}: ${errMsg}`);
+    return { success: false, error: errMsg };
+  } catch (err: any) {
+    console.warn(`[Drive Exception] deleteDriveFileOrFolder (${cleanId}):`, err?.message || err);
+    return { success: false, error: err?.message || 'Drive delete request failed' };
+  }
+}
+
