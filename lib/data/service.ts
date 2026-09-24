@@ -1,6 +1,6 @@
 import 'server-only';
 import { getServerSupabase, isServerSupabaseConfigured, isSupabaseHealthy, reportSupabaseFailure, reportSupabaseSuccess } from '@/lib/supabase/server';
-import { Project, Asset, AccessLink, Comment, Approval, StudioNotification } from '@/lib/supabase/database.types';
+import { Project, Asset, AccessLink, Comment, Approval, StudioNotification, ProjectStatus } from '@/lib/supabase/database.types';
 import bcrypt from 'bcryptjs';
 import { generateSlug } from '@/lib/utils/slug';
 import { deleteDriveFileOrFolder } from '@/lib/drive/client';
@@ -148,6 +148,8 @@ const DEFAULT_SEED_DATA: LocalStore = {
   projects: [
     {
       id: '00000000-0000-0000-0000-000000000001',
+      project_code: 'MDS-2026-001',
+      status: 'in_progress',
       title: 'هوية القناة 2027',
       description: 'تصميم وتطوير الهوية البصرية الشاملة للقناة التلفزيونية متضمنة الفواصل، شارة البداية، والعناصر ثلاثية الأبعاد.',
       cover_url: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=1200&q=80',
@@ -160,6 +162,8 @@ const DEFAULT_SEED_DATA: LocalStore = {
     },
     {
       id: '00000000-0000-0000-0000-000000000002',
+      project_code: 'MDS-2026-002',
+      status: 'ready_for_review',
       title: 'هوية الأخبار',
       description: 'حزمة الجرافيك الإخباري المتكامل: استوديو افتراضي، شريط الأخبار العاجلة، وقوالب المخططات البيانية المتحركة.',
       cover_url: 'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?auto=format&fit=crop&w=1200&q=80',
@@ -172,6 +176,8 @@ const DEFAULT_SEED_DATA: LocalStore = {
     },
     {
       id: '00000000-0000-0000-0000-000000000003',
+      project_code: 'MDS-2026-003',
+      status: 'changes_requested',
       title: 'الملف السياسي',
       description: 'موشن جرافيكس وهوية بصرية لبرنامج حواري سياسي أسبوعي مع مؤثرات سينمائية رقمية.',
       cover_url: 'https://images.unsplash.com/photo-1541872703-74c5e44368f9?auto=format&fit=crop&w=1200&q=80',
@@ -184,6 +190,8 @@ const DEFAULT_SEED_DATA: LocalStore = {
     },
     {
       id: '00000000-0000-0000-0000-000000000004',
+      project_code: 'MDS-2026-004',
+      status: 'final',
       title: 'جرافيك 26 سبتمبر',
       description: 'تغطية وطنية خاصة واحتفالية بذكرى 26 سبتمبر: شارات وثائقية وفواصل تلفزيونية مكتملة الإنتاج.',
       cover_url: 'https://images.unsplash.com/photo-1533130061792-64b345e4a833?auto=format&fit=crop&w=1200&q=80',
@@ -196,6 +204,8 @@ const DEFAULT_SEED_DATA: LocalStore = {
     },
     {
       id: '00000000-0000-0000-0000-000000000005',
+      project_code: 'MDS-2026-005',
+      status: 'approved',
       title: 'هوية رمضان',
       description: 'تصاميم رمضانية بصرية أنيقة تشمل مقدمة الإفطار، فواصل الإمساكية، وتنسيقات جدول البرامج الرمضاني.',
       cover_url: 'https://images.unsplash.com/photo-1564769625905-50e93615e769?auto=format&fit=crop&w=1200&q=80',
@@ -208,6 +218,8 @@ const DEFAULT_SEED_DATA: LocalStore = {
     },
     {
       id: '00000000-0000-0000-0000-000000000006',
+      project_code: 'MDS-2026-006',
+      status: 'new',
       title: 'لقاء خاص',
       description: 'هوية برنامج المقابلات الشخصية الحصري لكبار الضيوف بتدرجات داكنة وإضاءات استوديو دافئة.',
       cover_url: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=1200&q=80',
@@ -479,6 +491,37 @@ function getLocalStore(): LocalStore {
           updated = true;
         }
       }
+
+      // Backfill project_code and status for all existing projects in store
+      // Sort projects by created_at ascending for deterministic sequence generation
+      const sortedProjects = [...parsed.projects].sort(
+        (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
+      );
+
+      for (const p of sortedProjects) {
+        const target = parsed.projects.find((x) => x.id === p.id);
+        if (!target) continue;
+
+        if (!target.status) {
+          target.status = target.is_archived ? 'archived' : 'new';
+          updated = true;
+        }
+
+        if (!target.project_code || !target.project_code.trim()) {
+          const year = new Date(target.created_at || Date.now()).getFullYear();
+          const prefix = `MDS-${year}-`;
+          let maxNum = 0;
+          for (const ep of parsed.projects) {
+            if (ep.project_code && ep.project_code.startsWith(prefix)) {
+              const num = parseInt(ep.project_code.slice(prefix.length), 10);
+              if (!isNaN(num) && num > maxNum) maxNum = num;
+            }
+          }
+          target.project_code = `${prefix}${String(maxNum + 1).padStart(3, '0')}`;
+          updated = true;
+        }
+      }
+
       if (updated) {
         try {
           fs.writeFileSync(storeFile, JSON.stringify(parsed, null, 2), 'utf-8');
@@ -512,6 +555,89 @@ function saveLocalStore(data: LocalStore): void {
     fs.writeFileSync(storeFile, JSON.stringify(data, null, 2), 'utf-8');
   } catch {
     // In-memory globalThis.__mediaStudioLocalStore is already updated
+  }
+}
+
+export const VALID_PROJECT_STATUSES: readonly ProjectStatus[] = [
+  'new',
+  'in_progress',
+  'ready_for_review',
+  'changes_requested',
+  'approved',
+  'final',
+  'archived',
+] as const;
+
+export function isValidProjectStatus(status: unknown): status is ProjectStatus {
+  return typeof status === 'string' && (VALID_PROJECT_STATUSES as readonly string[]).includes(status);
+}
+
+// In-memory mutex and sequence tracker for concurrency-safe project_code sequence generation
+let projectCodeMutex = Promise.resolve();
+const localCodeSequences: Record<number, number> = {};
+
+export async function generateNextProjectCode(year: number = new Date().getFullYear()): Promise<string> {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((res) => {
+    release = res;
+  });
+  const prev = projectCodeMutex;
+  projectCodeMutex = (async () => {
+    try {
+      await prev;
+    } catch {
+      // ignore
+    }
+    await gate;
+  })();
+
+  try {
+    await prev;
+    const prefix = `MDS-${year}-`;
+
+    if (getDataMode() === 'supabase') {
+      const supabase = getServerSupabase();
+      if (supabase) {
+        try {
+          const { data, error } = await supabase.rpc('generate_project_code', { p_year: year });
+          if (!error && data && typeof data === 'string' && data.startsWith(prefix)) {
+            return data;
+          }
+          const { data: rows, error: qErr } = await supabase
+            .from('projects')
+            .select('project_code')
+            .like('project_code', `${prefix}%`);
+          if (!qErr && rows) {
+            let maxNum = 0;
+            for (const r of rows) {
+              if (r.project_code) {
+                const num = parseInt(r.project_code.slice(prefix.length), 10);
+                if (!isNaN(num) && num > maxNum) maxNum = num;
+              }
+            }
+            return `${prefix}${String(maxNum + 1).padStart(3, '0')}`;
+          }
+        } catch {
+          // fallback to local store below
+        }
+      }
+    }
+
+    // Determine current sequence value from store or sequence tracker
+    const store = getLocalStore();
+    let currentVal = localCodeSequences[year] || 0;
+    for (const p of store.projects) {
+      if (p.project_code && p.project_code.startsWith(prefix)) {
+        const num = parseInt(p.project_code.slice(prefix.length), 10);
+        if (!isNaN(num) && num > currentVal) currentVal = num;
+      }
+    }
+
+    const nextVal = currentVal + 1;
+    localCodeSequences[year] = nextVal;
+    return `${prefix}${String(nextVal).padStart(3, '0')}`;
+  } finally {
+    release();
   }
 }
 
@@ -1311,6 +1437,8 @@ export const dataService = {
 
             return {
               ...p,
+              project_code: p.project_code || 'MDS-2026-000',
+              status: p.status || (p.is_archived ? 'archived' : 'new'),
               file_count: fileCount,
               comments_count: commentsCount,
               approvals_count: approvalsCount,
@@ -1345,6 +1473,8 @@ export const dataService = {
 
       return {
         ...p,
+        project_code: p.project_code || 'MDS-2026-000',
+        status: p.status || (p.is_archived ? 'archived' : 'new'),
         show_progress: p.show_progress ?? true,
         allow_feedback: p.allow_feedback ?? true,
         display_cover_url: p.cover_url,
@@ -1554,6 +1684,8 @@ export const dataService = {
     if (!found) return null;
     return {
       ...found,
+      project_code: found.project_code || 'MDS-2026-000',
+      status: found.status || (found.is_archived ? 'archived' : 'new'),
       show_progress: found.show_progress ?? true,
       allow_feedback: found.allow_feedback ?? true,
       display_cover_url: found.cover_url,
@@ -1565,11 +1697,30 @@ export const dataService = {
     const showProgress = data.show_progress !== undefined ? Boolean(data.show_progress) : true;
     const allowFeedback = data.allow_feedback !== undefined ? Boolean(data.allow_feedback) : true;
 
+    // Validate and resolve project status
+    let initialStatus: ProjectStatus = 'new';
+    if (data.status) {
+      if (!isValidProjectStatus(data.status)) {
+        throw new Error(`حالة المشروع غير صالحة: '${data.status}'. الحالات المسموحة: ${VALID_PROJECT_STATUSES.join(', ')}`);
+      }
+      initialStatus = data.status;
+    } else if (data.is_archived) {
+      initialStatus = 'archived';
+    }
+
+    const isArchived = initialStatus === 'archived' ? true : Boolean(data.is_archived ?? false);
+
+    // Concurrency-safe atomic project_code generation
+    const currentYear = new Date().getFullYear();
+    const projectCode = data.project_code?.trim() || (await generateNextProjectCode(currentYear));
+
     if (getDataMode() === 'supabase') {
       const supabase = getServerSupabase();
       if (supabase) {
         try {
           const insertPayload: Record<string, any> = {
+            project_code: projectCode,
+            status: initialStatus,
             title: data.title || 'مشروع جديد',
             description: data.description || null,
             cover_url: data.cover_url ?? null,
@@ -1579,7 +1730,7 @@ export const dataService = {
             show_progress: showProgress,
             allow_feedback: allowFeedback,
             is_visible: data.is_visible ?? true,
-            is_archived: data.is_archived ?? false,
+            is_archived: isArchived,
           };
           if (data.id) insertPayload.id = data.id;
 
@@ -1593,7 +1744,11 @@ export const dataService = {
             reportSupabaseSuccess();
             const localSettings = getProjectSettingsMap();
             hydrateProjectSettings(resData, localSettings);
-            return resData;
+            return {
+              ...resData,
+              project_code: resData.project_code || projectCode,
+              status: resData.status || initialStatus,
+            };
           } else if (resErr) {
             reportSupabaseFailure(resErr);
             console.warn('[Supabase Warning] createProject failed, falling back to local store:', resErr.message);
@@ -1608,6 +1763,8 @@ export const dataService = {
     const store = getLocalStore();
     const newProj: Project = {
       id: data.id || crypto.randomUUID(),
+      project_code: projectCode,
+      status: initialStatus,
       title: data.title || 'مشروع جديد',
       description: data.description || null,
       cover_url: data.cover_url ?? null,
@@ -1619,7 +1776,7 @@ export const dataService = {
       show_progress: showProgress,
       allow_feedback: allowFeedback,
       is_visible: data.is_visible ?? true,
-      is_archived: data.is_archived ?? false,
+      is_archived: isArchived,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       file_count: 0,
@@ -1632,6 +1789,25 @@ export const dataService = {
   async updateProject(id: string, data: Partial<Project>): Promise<Project | null> {
     normalizeProjectCoverData(data);
 
+    // Enforce immutability of project_code
+    delete (data as any).project_code;
+
+    // Validate status if provided
+    if (data.status !== undefined) {
+      if (!isValidProjectStatus(data.status)) {
+        throw new Error(`حالة المشروع غير صالحة: '${data.status}'. الحالات المسموحة: ${VALID_PROJECT_STATUSES.join(', ')}`);
+      }
+      if (data.status === 'archived') {
+        data.is_archived = true;
+      } else if (data.is_archived === undefined) {
+        data.is_archived = false;
+      }
+    } else if (data.is_archived !== undefined) {
+      if (data.is_archived) {
+        data.status = 'archived';
+      }
+    }
+
     if (getDataMode() === 'supabase') {
       const supabase = getServerSupabase();
       if (supabase) {
@@ -1640,6 +1816,7 @@ export const dataService = {
             ...data,
             updated_at: new Date().toISOString(),
           };
+          delete updatePayload.project_code; // Enforce immutability
           if (data.cover_url !== undefined) updatePayload.cover_url = data.cover_url;
           if (data.cover_storage_path !== undefined) updatePayload.cover_storage_path = data.cover_storage_path;
 
@@ -1670,10 +1847,17 @@ export const dataService = {
     const idx = store.projects.findIndex((p) => p.id === id);
     if (idx < 0) return null;
 
+    const current = store.projects[idx];
+    const nextStatus = data.status ?? (data.is_archived ? 'archived' : (current.status ?? 'new'));
+    const nextIsArchived = data.is_archived ?? (nextStatus === 'archived');
+
     store.projects[idx] = {
-      ...store.projects[idx],
+      ...current,
       ...data,
-      allow_feedback: data.allow_feedback !== undefined ? Boolean(data.allow_feedback) : (store.projects[idx].allow_feedback ?? true),
+      project_code: current.project_code, // strictly preserved / immutable
+      status: nextStatus,
+      is_archived: nextIsArchived,
+      allow_feedback: data.allow_feedback !== undefined ? Boolean(data.allow_feedback) : (current.allow_feedback ?? true),
       updated_at: new Date().toISOString(),
     };
     saveLocalStore(store);

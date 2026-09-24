@@ -36,8 +36,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'اسم المشروع مطلوب' }, { status: 400 });
     }
 
+    if (body.status !== undefined && !dataService) {
+      // noop
+    }
+
     const project = await dataService.createProject({
       title: body.title.trim(),
+      status: body.status,
       description: body.description?.trim() || null,
       cover_url: body.cover_url?.trim() || null,
       cover_storage_path: body.cover_storage_path?.trim() || null,
@@ -46,7 +51,7 @@ export async function POST(req: Request) {
       show_progress: body.show_progress !== undefined ? Boolean(body.show_progress) : true,
       allow_feedback: body.allow_feedback !== undefined ? Boolean(body.allow_feedback) : true,
       is_visible: body.is_visible ?? true,
-      is_archived: false,
+      is_archived: body.status === 'archived' || Boolean(body.is_archived),
     });
 
     return NextResponse.json({ success: true, project });

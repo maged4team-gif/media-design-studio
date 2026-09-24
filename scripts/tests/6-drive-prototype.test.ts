@@ -867,7 +867,7 @@ async function runDrivePrototypeTests() {
     'Legacy upload sign endpoint blocks new Supabase Storage uploads with 409 Conflict when Drive is active'
   );
 
-  let driveDeleteCalled = false;
+  let driveDeleteCalled: boolean = false;
   mockFetch(async (url, init) => {
     if (init?.method === 'DELETE' && url.includes('googleapis.com')) {
       driveDeleteCalled = true;
@@ -882,7 +882,7 @@ async function runDrivePrototypeTests() {
 
   const projectDeleted = await dataService.deleteProject(testProject.id);
   assert(projectDeleted === true, 'Project deleted from database successfully even when Drive returns 404');
-  assert(driveDeleteCalled === true, 'dataService.deleteProject safely purges associated Google Drive files');
+  assert((driveDeleteCalled as boolean) === true, 'dataService.deleteProject safely purges associated Google Drive files');
   restoreFetch();
 
   // =============================================================

@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { Project, AccessLink } from '@/lib/supabase/database.types';
+import { Project, AccessLink, ProjectStatus, PROJECT_STATUS_LABELS, PROJECT_STATUS_COLORS } from '@/lib/supabase/database.types';
 import { AdminNavbar } from '@/components/admin/AdminNavbar';
 import {
   FolderKanban,
@@ -26,6 +26,10 @@ import {
   Lock,
   CheckSquare,
   Square,
+  Search,
+  Filter,
+  Tag,
+  ChevronDown,
 } from 'lucide-react';
 
 interface AdminProjectsViewProps {
@@ -57,6 +61,24 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
   } | null>(null);
   const [sharingProject, setSharingProject] = useState<Project | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Search & Filter State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | ProjectStatus>('all');
+  const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
+
+  // Status Counts for Badges/Pills
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: projects.length };
+    for (const st of Object.keys(PROJECT_STATUS_LABELS) as ProjectStatus[]) {
+      counts[st] = 0;
+    }
+    for (const p of projects) {
+      const st = p.status || (p.is_archived ? 'archived' : 'new');
+      counts[st] = (counts[st] || 0) + 1;
+    }
+    return counts;
+  }, [projects]);
 
   // Batch & Safe Delete State
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
@@ -119,16 +141,69 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
   // Toggle Archive
   const handleToggleArchive = async (project: Project) => {
     const nextVal = !project.is_archived;
+    const nextStatus: ProjectStatus = nextVal ? 'archived' : 'in_progress';
     const res = await fetch(`/api/admin/projects/${project.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_archived: nextVal }),
+      body: JSON.stringify({ is_archived: nextVal, status: nextStatus }),
     });
 
     if (res.ok) {
       setProjects((prev) =>
-        prev.map((p) => (p.id === project.id ? { ...p, is_archived: nextVal } : p))
+        prev.map((p) => (p.id === project.id ? { ...p, is_archived: nextVal, status: nextStatus } : p))
       );
+    }
+  };
+
+  // Change Project Status directly
+  const handleUpdateStatus = async (project: Project, newStatus: ProjectStatus) => {
+    setUpdatingStatusId(project.id);
+    const prevStatus = project.status || (project.is_archived ? 'archived' : 'new');
+    const prevArchived = project.is_archived;
+    const isNowArchived = newStatus === 'archived';
+
+    // Optimistic update
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === project.id
+          ? { ...p, status: newStatus, is_archived: isNowArchived }
+          : p
+      )
+    );
+
+    try {
+      const res = await fetch(`/api/admin/projects/${project.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus, is_archived: isNowArchived }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error || 'تعذر تغيير حالة المشروع');
+      }
+
+      const resData = await res.json();
+      if (resData.project) {
+        setProjects((prev) =>
+          prev.map((p) => (p.id === project.id ? { ...p, ...resData.project } : p))
+        );
+      }
+    } catch (err: any) {
+      // Revert on error
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === project.id
+            ? { ...p, status: prevStatus, is_archived: prevArchived }
+            : p
+        )
+      );
+      setActionBanner({
+        type: 'error',
+        message: err?.message || 'تعذر تغيير حالة المشروع',
+      });
+    } finally {
+      setUpdatingStatusId(null);
     }
   };
 
@@ -180,9 +255,30 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
     }
   };
 
-  const displayedProjects = projects.filter((p) =>
-    filterArchived ? p.is_archived : !p.is_archived
-  );
+  const displayedProjects = useMemo(() => {
+    return projects.filter((project) => {
+      // 1. Status Filter
+      if (selectedStatusFilter !== 'all') {
+        const projStatus = project.status || (project.is_archived ? 'archived' : 'new');
+        if (projStatus !== selectedStatusFilter) return false;
+      } else if (filterArchived) {
+        if (!project.is_archived && project.status !== 'archived') return false;
+      } else {
+        if (project.is_archived || project.status === 'archived') return false;
+      }
+
+      // 2. Search Query (matches project title, project_code, or category)
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const matchTitle = (project.title || '').toLowerCase().includes(q);
+        const matchCode = (project.project_code || '').toLowerCase().includes(q);
+        const matchCategory = (project.category || '').toLowerCase().includes(q);
+        if (!matchTitle && !matchCode && !matchCategory) return false;
+      }
+
+      return true;
+    });
+  }, [projects, selectedStatusFilter, filterArchived, searchQuery]);
 
   const allDisplayedSelected =
     displayedProjects.length > 0 &&
@@ -402,15 +498,23 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
             )}
 
             <button
-              onClick={() => setFilterArchived(!filterArchived)}
+              onClick={() => {
+                if (filterArchived || selectedStatusFilter === 'archived') {
+                  setFilterArchived(false);
+                  setSelectedStatusFilter('all');
+                } else {
+                  setFilterArchived(true);
+                  setSelectedStatusFilter('archived');
+                }
+              }}
               className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold border transition ${
-                filterArchived
+                filterArchived || selectedStatusFilter === 'archived'
                   ? 'border-amber-500/30 bg-amber-500/15 text-studio-gold'
                   : 'border-white/10 bg-studio-surface text-studio-text-secondary hover:text-white'
               }`}
             >
-              {filterArchived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
-              <span>{filterArchived ? 'المشاريع النشطة' : 'المشاريع المؤرشفة'}</span>
+              {filterArchived || selectedStatusFilter === 'archived' ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+              <span>{filterArchived || selectedStatusFilter === 'archived' ? 'المشاريع النشطة' : 'المشاريع المؤرشفة'}</span>
             </button>
 
             <Link
@@ -420,6 +524,84 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
               <PlusCircle className="h-4 w-4" />
               <span>+ مشروع جديد</span>
             </Link>
+          </div>
+        </div>
+
+        {/* Search & Filter Toolbar */}
+        <div className="mb-6 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-studio-surface/60 border border-white/10 rounded-2xl p-3 shadow-lg">
+          {/* Search Box */}
+          <div className="relative flex-1 min-w-[280px]">
+            <Search className="h-4 w-4 absolute right-3.5 top-1/2 -translate-y-1/2 text-studio-text-muted pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="ابحث باسم المشروع أو كود المشروع (مثال: MDS-2026-001)..."
+              className="w-full rounded-xl border border-white/10 bg-studio-card/90 pr-10 pl-9 py-2 text-xs text-white placeholder-studio-text-muted outline-none focus:border-studio-blue focus:ring-1 focus:ring-studio-blue transition"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-studio-text-muted hover:text-white p-0.5 rounded transition text-xs"
+                title="مسح البحث"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* Status Filters Bar */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
+            <div className="flex items-center gap-1 shrink-0 text-xs font-semibold text-studio-text-secondary pl-1">
+              <Filter className="h-3.5 w-3.5 text-studio-blue-glow" />
+              <span>الحالة:</span>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-nowrap shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedStatusFilter('all');
+                  setFilterArchived(false);
+                }}
+                className={`rounded-xl px-3 py-1.5 text-xs font-semibold border transition shrink-0 ${
+                  selectedStatusFilter === 'all' && !filterArchived
+                    ? 'border-studio-blue bg-studio-blue text-white shadow-md shadow-studio-blue/30'
+                    : 'border-white/10 bg-studio-card/60 text-studio-text-secondary hover:text-white hover:border-white/20'
+                }`}
+              >
+                الكل ({statusCounts.all})
+              </button>
+
+              {(Object.keys(PROJECT_STATUS_LABELS) as ProjectStatus[]).map((st) => {
+                const isSelected = selectedStatusFilter === st;
+                const colors = PROJECT_STATUS_COLORS[st];
+                return (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => {
+                      setSelectedStatusFilter(st);
+                      if (st === 'archived') {
+                        setFilterArchived(true);
+                      } else {
+                        setFilterArchived(false);
+                      }
+                    }}
+                    className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold border transition shrink-0 ${
+                      isSelected
+                        ? `${colors.border} ${colors.bg} ${colors.text} ring-1 ring-current font-bold`
+                        : 'border-white/10 bg-studio-card/60 text-studio-text-secondary hover:text-white hover:border-white/20'
+                    }`}
+                  >
+                    <span className={`h-2 w-2 rounded-full ${colors.dot}`} />
+                    <span>{PROJECT_STATUS_LABELS[st]}</span>
+                    <span className="text-[10px] opacity-75">({statusCounts[st] || 0})</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -506,6 +688,39 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
 
                 {/* Content */}
                 <div className="flex flex-1 flex-col p-5">
+                  {/* Project Code & Status Selector Row */}
+                  <div className="flex items-center justify-between gap-2 mb-2.5">
+                    {/* Project Code Tag */}
+                    <div
+                      className="inline-flex items-center gap-1.5 font-mono text-[11px] font-bold text-studio-gold bg-studio-gold/10 px-2.5 py-0.5 rounded-lg border border-studio-gold/25 shadow-sm"
+                      title="كود المشروع الفريد"
+                    >
+                      <Tag className="h-3 w-3 text-studio-gold" />
+                      <span>{project.project_code || 'MDS-2026-000'}</span>
+                    </div>
+
+                    {/* Quick Status Select / Badge */}
+                    <div className="relative inline-flex items-center">
+                      <select
+                        value={project.status || (project.is_archived ? 'archived' : 'new')}
+                        onChange={(e) => handleUpdateStatus(project, e.target.value as ProjectStatus)}
+                        disabled={updatingStatusId === project.id}
+                        className={`text-[11px] font-bold rounded-lg px-2.5 py-1 border transition appearance-none cursor-pointer pr-6 pl-2 outline-none focus:ring-1 focus:ring-studio-blue ${
+                          PROJECT_STATUS_COLORS[project.status || (project.is_archived ? 'archived' : 'new')]?.badge ||
+                          'bg-white/10 text-white border-white/20'
+                        } ${updatingStatusId === project.id ? 'opacity-50 cursor-wait' : ''}`}
+                        title="تغيير حالة المشروع مباشرة"
+                      >
+                        {(Object.keys(PROJECT_STATUS_LABELS) as ProjectStatus[]).map((st) => (
+                          <option key={st} value={st} className="bg-[#12141a] text-white">
+                            {PROJECT_STATUS_LABELS[st]}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="h-3 w-3 absolute right-2 pointer-events-none opacity-60" />
+                    </div>
+                  </div>
+
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="text-base font-bold text-white line-clamp-1">{project.title}</h3>
                     <span className="rounded bg-white/5 px-2 py-0.5 text-xs text-studio-text-secondary whitespace-nowrap">
@@ -700,13 +915,31 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
         ) : (
           <div className="flex min-h-[350px] flex-col items-center justify-center rounded-2xl border border-white/5 bg-studio-surface/40 p-8 text-center">
             <FolderKanban className="h-16 w-16 text-studio-text-muted opacity-40 mb-3" />
-            <h3 className="text-lg font-bold text-white">لا توجد مشاريع</h3>
+            <h3 className="text-lg font-bold text-white">
+              {searchQuery || selectedStatusFilter !== 'all'
+                ? 'لم يتم العثور على مشاريع مطابقة'
+                : 'لا توجد مشاريع'}
+            </h3>
             <p className="mt-1 text-xs text-studio-text-secondary max-w-sm">
-              {filterArchived
+              {searchQuery || selectedStatusFilter !== 'all'
+                ? 'جرّب تعديل كلمة البحث أو تغيير فلتر الحالة للوصول إلى المشاريع المطلوبة.'
+                : filterArchived
                 ? 'لا توجد مشاريع مؤرشفة حالياً'
                 : 'ابدأ بإنشاء أول مشروع تصميم لعرضه للعملاء'}
             </p>
-            {!filterArchived && (
+            {searchQuery || selectedStatusFilter !== 'all' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setSelectedStatusFilter('all');
+                  setFilterArchived(false);
+                }}
+                className="mt-4 rounded-xl border border-white/10 bg-studio-surface hover:bg-studio-card px-4 py-2 text-xs font-semibold text-white transition"
+              >
+                إعادة ضبط البحث والتصفية
+              </button>
+            ) : !filterArchived ? (
               <Link
                 href="/admin/projects/new"
                 className="mt-4 flex items-center gap-2 rounded-xl bg-studio-blue px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-studio-blue/25 hover:bg-studio-blue-glow transition"
@@ -714,7 +947,7 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
                 <PlusCircle className="h-4 w-4" />
                 <span>+ مشروع جديد</span>
               </Link>
-            )}
+            ) : null}
           </div>
         )}
 

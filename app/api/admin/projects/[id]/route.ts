@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAdminSession, extractCookieFromRequest } from '@/lib/auth/session';
-import { dataService } from '@/lib/data/service';
+import { dataService, isValidProjectStatus, VALID_PROJECT_STATUSES } from '@/lib/data/service';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
 
 interface RouteProps {
@@ -27,6 +27,15 @@ export async function PATCH(req: Request, { params }: RouteProps) {
     const updateData: Record<string, unknown> = {};
 
     if (body.title !== undefined) updateData.title = body.title.trim();
+    if (body.status !== undefined) {
+      if (!isValidProjectStatus(body.status)) {
+        return NextResponse.json(
+          { error: `حالة المشروع غير صالحة. الحالات المسموحة: ${VALID_PROJECT_STATUSES.join(', ')}` },
+          { status: 400 }
+        );
+      }
+      updateData.status = body.status;
+    }
     if (body.cover_url !== undefined) updateData.cover_url = body.cover_url ? body.cover_url.trim() : null;
     if (body.cover_storage_path !== undefined) updateData.cover_storage_path = body.cover_storage_path ? body.cover_storage_path.trim() : null;
     if (body.category !== undefined) updateData.category = body.category?.trim() || null;
@@ -37,6 +46,7 @@ export async function PATCH(req: Request, { params }: RouteProps) {
     if (body.is_archived !== undefined) updateData.is_archived = Boolean(body.is_archived);
     if (body.show_progress !== undefined) updateData.show_progress = Boolean(body.show_progress);
     if (body.allow_feedback !== undefined) updateData.allow_feedback = Boolean(body.allow_feedback);
+    // Note: project_code is intentionally ignored to guarantee immutability
 
     const project = await dataService.updateProject(id, updateData);
     if (!project) {

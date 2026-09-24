@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Project, Asset } from '@/lib/supabase/database.types';
+import { Project, Asset, ProjectStatus, PROJECT_STATUS_LABELS, PROJECT_STATUS_COLORS } from '@/lib/supabase/database.types';
 import { AdminNavbar } from '@/components/admin/AdminNavbar';
 import { MediaUploader } from '@/components/admin/MediaUploader';
 import { formatFileSize, formatSeconds, getAssetTypeLabel } from '@/lib/utils/formatters';
@@ -31,6 +31,7 @@ import {
   Play,
   Cloud,
   Image as ImageIcon,
+  Tag,
 } from 'lucide-react';
 
 interface ProjectAssetsManagerProps {
@@ -57,6 +58,7 @@ export const ProjectAssetsManager: React.FC<ProjectAssetsManagerProps> = ({
 
   // Edit Project Details State
   const [title, setTitle] = useState(project.title);
+  const [status, setStatus] = useState<ProjectStatus>(project.status || (project.is_archived ? 'archived' : 'new'));
   const [description, setDescription] = useState(project.description || '');
   const [progress, setProgress] = useState(project.progress);
   const [category, setCategory] = useState(project.category || '');
@@ -217,6 +219,7 @@ export const ProjectAssetsManager: React.FC<ProjectAssetsManagerProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title,
+          status,
           description,
           progress: Number(progress),
           category,
@@ -324,8 +327,8 @@ export const ProjectAssetsManager: React.FC<ProjectAssetsManagerProps> = ({
 
       <main className="mx-auto flex-1 w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Navigation Breadcrumb */}
-        <div className="mb-6 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             <Link
               href="/admin"
               className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-studio-surface px-3 py-1.5 text-xs text-studio-text-secondary hover:text-white transition"
@@ -334,9 +337,21 @@ export const ProjectAssetsManager: React.FC<ProjectAssetsManagerProps> = ({
               <span>المشاريع</span>
             </Link>
             <span className="text-studio-text-muted text-xs">/</span>
+            <span className="inline-flex items-center gap-1.5 font-mono text-xs font-bold text-studio-gold bg-studio-gold/10 px-2.5 py-1 rounded-lg border border-studio-gold/25 shrink-0 shadow-sm">
+              <Tag className="h-3 w-3 text-studio-gold" />
+              <span>{project.project_code || 'MDS-2026-000'}</span>
+            </span>
             <h1 className="text-lg sm:text-xl font-bold text-white truncate max-w-sm sm:max-w-md">
               {project.title}
             </h1>
+            <span
+              className={`text-xs font-bold rounded-lg px-2.5 py-1 border shrink-0 ${
+                PROJECT_STATUS_COLORS[project.status || (project.is_archived ? 'archived' : 'new')]?.badge ||
+                'bg-white/10 text-white'
+              }`}
+            >
+              {PROJECT_STATUS_LABELS[project.status || (project.is_archived ? 'archived' : 'new')]}
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -349,7 +364,7 @@ export const ProjectAssetsManager: React.FC<ProjectAssetsManagerProps> = ({
         {/* Project Quick Edit Details Form */}
         <div className="glass-card mb-8 rounded-2xl border border-white/10 p-6 shadow-xl">
           <form onSubmit={handleSaveProjectDetails} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
               {/* Title */}
               <div>
                 <label className="block text-xs font-semibold text-white mb-1.5">اسم المشروع</label>
@@ -359,6 +374,22 @@ export const ProjectAssetsManager: React.FC<ProjectAssetsManagerProps> = ({
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full rounded-xl border border-white/10 bg-studio-surface px-3 py-2 text-xs text-white outline-none focus:border-studio-blue"
                 />
+              </div>
+
+              {/* Status */}
+              <div>
+                <label className="block text-xs font-semibold text-white mb-1.5">حالة المشروع</label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as ProjectStatus)}
+                  className="w-full rounded-xl border border-white/10 bg-studio-surface px-3 py-2 text-xs text-white outline-none focus:border-studio-blue cursor-pointer"
+                >
+                  {(Object.keys(PROJECT_STATUS_LABELS) as ProjectStatus[]).map((st) => (
+                    <option key={st} value={st} className="bg-[#12141a] text-white">
+                      {PROJECT_STATUS_LABELS[st]}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Category */}

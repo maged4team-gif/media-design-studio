@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Test Suite 13: Resilient Google Drive Cleanup & Safe Batch Project Deletion
  * Run via: npx tsx --conditions=react-server scripts/tests/13-safe-project-deletion.test.ts
  */
@@ -85,8 +85,7 @@ async function runTests() {
   console.log('================================================================\n');
 
   const mockAdminToken = createSignedToken(
-    { isAdmin: true, expiresAt: Date.now() + 60 * 60 * 1000 },
-    60 * 60 * 1000
+    { isAdmin: true, expiresAt: Date.now() + 60 * 60 * 1000 }
   );
 
   // -------------------------------------------------------------
@@ -101,7 +100,7 @@ async function runTests() {
   // Root folder protection (by ID)
   const rootProtectRes = await deleteDriveFileOrFolder('mock-root-archive-folder-id');
   assert(rootProtectRes.success === false, 'Strictly blocks deletion of root archive folder by ID');
-  assert(rootProtectRes.error?.includes('root archive'), 'Returns explicit error for root archive folder protection');
+  assert(Boolean(rootProtectRes.error?.includes('root archive')), 'Returns explicit error for root archive folder protection');
 
   // Root folder protection (by Name check)
   mockFetch(async (url) => {

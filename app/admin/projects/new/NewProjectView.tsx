@@ -3,12 +3,14 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { ProjectStatus, PROJECT_STATUS_LABELS } from '@/lib/supabase/database.types';
 import { AdminNavbar } from '@/components/admin/AdminNavbar';
 import { ArrowRight, Upload, Check, MessageSquare, Eye } from 'lucide-react';
 
 export function NewProjectView() {
   const router = useRouter();
   const [title, setTitle] = useState('');
+  const [status, setStatus] = useState<ProjectStatus>('new');
   const [coverUrl, setCoverUrl] = useState('');
   const [coverPreviewUrl, setCoverPreviewUrl] = useState('');
   const [description, setDescription] = useState('');
@@ -128,6 +130,7 @@ export function NewProjectView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: title.trim(),
+          status: status,
           cover_url: coverUrl.trim() || null,
           description: description.trim() || null,
           category: category.trim() || null,
@@ -258,6 +261,27 @@ export function NewProjectView() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              {/* حالة المشروع الأولية */}
+              <div>
+                <label className="block text-xs font-semibold text-white mb-2">
+                  حالة المشروع الأولية
+                </label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as ProjectStatus)}
+                  className="w-full rounded-xl border border-white/10 bg-studio-surface px-4 py-2.5 text-sm text-white outline-none transition focus:border-studio-blue cursor-pointer"
+                >
+                  {(Object.keys(PROJECT_STATUS_LABELS) as ProjectStatus[]).map((st) => (
+                    <option key={st} value={st} className="bg-[#12141a] text-white">
+                      {PROJECT_STATUS_LABELS[st]}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[11px] text-studio-text-muted">
+                  الحالة الافتراضية هي &quot;جديد&quot;. يمكنك تغييرها لاحقاً في أي وقت.
+                </p>
+              </div>
+
               {/* التصنيف (optional) */}
               <div>
                 <label className="block text-xs font-semibold text-white mb-2">
