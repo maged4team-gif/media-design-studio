@@ -553,7 +553,9 @@ export const ProjectAssetsManager: React.FC<ProjectAssetsManagerProps> = ({
         <div className="mb-8">
           <MediaUploader
             projectId={project.id}
-            onUploadSuccess={(newAsset) => setAssets((prev) => [...prev, newAsset])}
+            onUploadSuccess={(newAsset) =>
+              setAssets((prev) => (prev.some((a) => a.id === newAsset.id) ? prev : [...prev, newAsset]))
+            }
           />
         </div>
 
