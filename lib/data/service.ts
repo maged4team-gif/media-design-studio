@@ -1864,6 +1864,68 @@ export const dataService = {
     return store.projects[idx];
   },
 
+  /**
+   * Atomically claims or assigns a Google Drive folder ID to a project.
+   * Uses Compare-And-Set (CAS) to prevent race conditions when concurrent uploads initialize.
+   * If drive_folder_id is already set, returns { claimed: false, folderId: existingId }.
+   * If claimed successfully, returns { claimed: true, folderId: candidateFolderId }.
+   */
+  async claimProjectDriveFolder(
+    projectId: string,
+    candidateFolderId: string
+  ): Promise<{ claimed: boolean; folderId: string }> {
+    const cleanCandidate = candidateFolderId.trim();
+
+    if (getDataMode() === 'supabase') {
+      const supabase = getServerSupabase();
+      if (supabase) {
+        try {
+          // Compare-And-Set: Only update if drive_folder_id is NULL
+          const { data, error } = await supabase
+            .from('projects')
+            .update({
+              drive_folder_id: cleanCandidate,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', projectId)
+            .is('drive_folder_id', null)
+            .select('id, drive_folder_id')
+            .maybeSingle();
+
+          if (!error && data?.drive_folder_id) {
+            reportSupabaseSuccess();
+            return { claimed: true, folderId: data.drive_folder_id };
+          }
+
+          // If no row updated, someone else already claimed it or it was not null
+          const fresh = await this.getProjectById(projectId);
+          if (fresh?.drive_folder_id) {
+            return { claimed: false, folderId: fresh.drive_folder_id };
+          }
+        } catch (err: any) {
+          reportSupabaseFailure(err);
+          console.warn('[Supabase Warning] claimProjectDriveFolder failed, falling back to local store:', err?.message || err);
+        }
+      }
+    }
+
+    const store = getLocalStore();
+    const idx = store.projects.findIndex((p) => p.id === projectId);
+    if (idx < 0) {
+      throw new Error(`Project ${projectId} not found`);
+    }
+
+    const project = store.projects[idx];
+    if (!project.drive_folder_id || project.drive_folder_id.trim() === '') {
+      project.drive_folder_id = cleanCandidate;
+      project.updated_at = new Date().toISOString();
+      saveLocalStore(store);
+      return { claimed: true, folderId: cleanCandidate };
+    }
+
+    return { claimed: false, folderId: project.drive_folder_id };
+  },
+
   async deleteProject(id: string): Promise<boolean> {
     const supabase = getServerSupabase();
     let projectDriveFolderId: string | null = null;

@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server';
 import { getAdminSession, extractCookieFromRequest } from '@/lib/auth/session';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
 import { dataService } from '@/lib/data/service';
-import { getFileMetadata } from '@/lib/drive/client';
+import {
+  getFileMetadata,
+  moveDriveFile,
+  isDriveFolderEmpty,
+  deleteDriveFileOrFolder,
+} from '@/lib/drive/client';
+import { getDriveCredentials } from '@/lib/drive/credentials-store';
 import crypto from 'crypto';
 
 export async function POST(req: Request) {
@@ -42,7 +48,7 @@ export async function POST(req: Request) {
     }
 
     // 1. Server-side Pre-registration Verification against Google Drive
-    const metadata = await getFileMetadata(fileId);
+    let metadata = await getFileMetadata(fileId);
     if (!metadata) {
       return NextResponse.json(
         { error: 'الملف غير موجود في Google Drive أو تعذر التحقق منه' },
@@ -65,11 +71,65 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!metadata.parents || !metadata.parents.includes(project.drive_folder_id)) {
-      return NextResponse.json(
-        { error: 'مجلد الملف في Google Drive لا يتطابق مع مجلد المشروع المسجل' },
-        { status: 400 }
-      );
+    const officialFolderId = project.drive_folder_id.trim();
+    let hasOfficialParent = Boolean(metadata.parents && metadata.parents.includes(officialFolderId));
+
+    if (!hasOfficialParent) {
+      // Safe Server-Side Recovery for files caught in concurrent folder creation races:
+      const currentParentId = metadata.parents?.[0];
+      if (currentParentId) {
+        try {
+          const parentMeta = await getFileMetadata(currentParentId);
+          if (parentMeta) {
+            // Verify that the current parent folder was created for THIS project
+            const isProjectOrphanFolder =
+              Boolean(parentMeta.name?.includes(`[${project.id}]`)) ||
+              Boolean(parentMeta.name?.includes(project.id));
+
+            const storedCreds = await getDriveCredentials().catch(() => null);
+            const rootFolderId = (storedCreds?.rootFolderId || process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || '').trim();
+            const isUnderArchiveRoot = Boolean(rootFolderId && parentMeta.parents?.includes(rootFolderId));
+
+            if (isProjectOrphanFolder || isUnderArchiveRoot) {
+              console.log(
+                `[Drive Recovery] Moving file ${fileId} from orphan project folder ${currentParentId} to official project folder ${officialFolderId}`
+              );
+              const moveRes = await moveDriveFile(fileId, officialFolderId, currentParentId);
+              if (moveRes.success) {
+                // Re-fetch metadata from Google Drive to strictly confirm new parent
+                const refreshedMeta = await getFileMetadata(fileId);
+                if (refreshedMeta?.parents?.includes(officialFolderId)) {
+                  metadata = refreshedMeta;
+                  hasOfficialParent = true;
+                  console.log(
+                    `[Drive Recovery] Successfully moved and verified file ${fileId} in official folder ${officialFolderId}`
+                  );
+
+                  // If the orphan folder is now empty, clean it up safely
+                  const isEmpty = await isDriveFolderEmpty(currentParentId);
+                  if (isEmpty) {
+                    deleteDriveFileOrFolder(currentParentId, { isFolder: true, safeRootFolderId: rootFolderId }).catch(
+                      () => {}
+                    );
+                  }
+                }
+              } else {
+                console.warn(`[Drive Recovery] Failed to move file ${fileId}:`, moveRes.error);
+              }
+            }
+          }
+        } catch (recoverErr: any) {
+          console.warn('[Drive Recovery] Exception during orphan folder recovery:', recoverErr?.message);
+        }
+      }
+
+      // Re-verify after recovery attempt: STRICT PARENT ENFORCEMENT PRESERVED
+      if (!metadata.parents || !metadata.parents.includes(officialFolderId)) {
+        return NextResponse.json(
+          { error: 'مجلد الملف في Google Drive لا يتطابق مع مجلد المشروع المسجل' },
+          { status: 400 }
+        );
+      }
     }
 
     // 2. Global Idempotent check (including hidden and all-project assets)

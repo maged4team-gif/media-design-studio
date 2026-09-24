@@ -232,7 +232,7 @@ async function runUploadQueueTests() {
   // -------------------------------------------------------------
   console.log('\n>>> 7. Testing Pause, Resume & Cancel Mechanics...');
   // Pause Item 1
-  let aborted = false;
+  let aborted: boolean = false;
   const mockAbortController = {
     abort: () => {
       aborted = true;
@@ -242,8 +242,8 @@ async function runUploadQueueTests() {
   mockQueue[0].abortController = mockAbortController as any;
 
   // Execute pause
-  mockQueue[0].abortController.abort();
-  assert(aborted === true, 'Pause triggers AbortController.abort() on active HTTP request');
+  mockQueue[0].abortController?.abort();
+  assert(Boolean(aborted), 'Pause triggers AbortController.abort() on active HTTP request');
   mockQueue[0] = {
     ...mockQueue[0],
     status: 'paused',

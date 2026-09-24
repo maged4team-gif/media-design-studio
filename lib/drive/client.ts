@@ -1116,3 +1116,63 @@ export async function deleteDriveFileOrFolder(
   }
 }
 
+/**
+ * Safely moves a file in Google Drive from one parent folder to another.
+ * Used for server-side recovery of files uploaded during race conditions.
+ */
+export async function moveDriveFile(
+  fileId: string,
+  addParentId: string,
+  removeParentId: string
+): Promise<{ success: boolean; parents?: string[]; error?: string }> {
+  try {
+    const token = await getValidAccessToken();
+    const url = `${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?addParents=${encodeURIComponent(addParentId)}&removeParents=${encodeURIComponent(removeParentId)}&fields=id,name,parents`;
+
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      return {
+        success: false,
+        error: errData.error?.message || `Google Drive file move failed with HTTP ${res.status}`,
+      };
+    }
+
+    const data = await res.json();
+    return {
+      success: true,
+      parents: data.parents || [],
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Exception during Drive file move',
+    };
+  }
+}
+
+/**
+ * Checks if a Google Drive folder contains any files or active subfolders.
+ */
+export async function isDriveFolderEmpty(folderId: string): Promise<boolean> {
+  try {
+    const token = await getValidAccessToken();
+    const query = `'${folderId.replace(/'/g, "\\'")}' in parents and trashed = false`;
+    const res = await fetch(`${DRIVE_API_BASE}/files?q=${encodeURIComponent(query)}&pageSize=1&fields=files(id)`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return !data.files || data.files.length === 0;
+    }
+  } catch {}
+  return false;
+}
+

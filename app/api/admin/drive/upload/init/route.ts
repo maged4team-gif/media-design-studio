@@ -6,12 +6,71 @@ import {
   isDriveConfigured,
   ensureArchiveRootFolder,
   ensureProjectFolder,
+  deleteDriveFileOrFolder,
   initiateResumableUpload,
   createUploadSessionTicket,
 } from '@/lib/drive/client';
 
 const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB limit
 const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB per chunk
+
+// In-process mutex map to deduplicate concurrent folder creation for the same project
+const inFlightFolderPromises = new Map<string, Promise<string>>();
+
+/**
+ * Concurrency-safe resolution of project subfolder.
+ * 1. Deduplicates concurrent requests in the same Node process via an in-memory Promise.
+ * 2. Uses atomic Compare-And-Set (CAS) in Supabase/store to ensure only ONE candidate folder wins.
+ * 3. Safely cleans up any redundant orphan folder created during the race.
+ */
+async function resolveProjectFolderAtomic(
+  projectTitle: string,
+  projectId: string,
+  rootFolderId: string
+): Promise<string> {
+  const pending = inFlightFolderPromises.get(projectId);
+  if (pending) {
+    return pending;
+  }
+
+  const promise = (async () => {
+    try {
+      // Re-fetch project to ensure another concurrent request or process didn't just assign it
+      const current = await dataService.getProjectById(projectId);
+      if (current?.drive_folder_id && current.drive_folder_id.trim() !== '') {
+        return current.drive_folder_id.trim();
+      }
+
+      // Create candidate folder in Google Drive
+      const candidateFolderId = await ensureProjectFolder(projectTitle, projectId, rootFolderId);
+
+      // Perform atomic Compare-And-Set in database
+      const claimResult = await dataService.claimProjectDriveFolder(projectId, candidateFolderId);
+
+      if (claimResult.claimed) {
+        return candidateFolderId;
+      }
+
+      // Another concurrent request won the race! Use the winner's folder
+      const officialFolderId = claimResult.folderId;
+
+      // Safely delete the redundant candidate folder if it wasn't claimed
+      if (candidateFolderId && candidateFolderId !== officialFolderId) {
+        console.warn(`[Drive CAS] Cleaning up redundant candidate folder ${candidateFolderId} in favor of ${officialFolderId}`);
+        deleteDriveFileOrFolder(candidateFolderId, { isFolder: true, safeRootFolderId: rootFolderId }).catch((err) => {
+          console.warn('[Drive CAS] Redundant folder cleanup notice:', err?.message);
+        });
+      }
+
+      return officialFolderId;
+    } finally {
+      inFlightFolderPromises.delete(projectId);
+    }
+  })();
+
+  inFlightFolderPromises.set(projectId, promise);
+  return promise;
+}
 
 export async function POST(req: Request) {
   if (!verifyRequestOrigin(req)) {
@@ -62,11 +121,10 @@ export async function POST(req: Request) {
     // 1. Ensure root studio archive folder exists
     const rootFolderId = await ensureArchiveRootFolder();
 
-    // 2. Ensure project subfolder exists inside root archive
-    let projectFolderId = project.drive_folder_id;
+    // 2. Concurrency-safe resolution of project subfolder
+    let projectFolderId = project.drive_folder_id?.trim();
     if (!projectFolderId) {
-      projectFolderId = await ensureProjectFolder(project.title, project.id, rootFolderId);
-      await dataService.updateProject(project.id, { drive_folder_id: projectFolderId });
+      projectFolderId = await resolveProjectFolderAtomic(project.title, project.id, rootFolderId);
     }
 
     // 3. Initiate resumable upload with Google Drive API
