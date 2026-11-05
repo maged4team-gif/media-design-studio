@@ -8,14 +8,17 @@ import { StudioHeader } from '@/components/shared/StudioHeader';
 import { AssetCard } from '@/components/client/AssetCard';
 import { MediaLightbox } from '@/components/client/MediaLightbox';
 import { ArrowRight, Film, Image as ImageIcon, FileText, LayoutGrid, AlertCircle } from 'lucide-react';
+import { buildClientFooterText, resolveLinkBranding, type LinkBranding } from '@/lib/branding';
 
 interface ProjectDetailViewProps {
-  viewerName: string;
+  /** null when the link hides the recipient's name. */
+  viewerName: string | null;
   linkId: string;
   slug: string;
   project: Project;
   initialAssets: Asset[];
   isDirect?: boolean;
+  branding?: LinkBranding;
 }
 
 type FilterTab = 'all' | 'video' | 'image' | 'file';
@@ -27,8 +30,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   project,
   initialAssets,
   isDirect = false,
+  branding = resolveLinkBranding(null),
 }) => {
   const router = useRouter();
+  const footerText = buildClientFooterText(branding, 'استوديو التصميم التلفزيوني والإعلامي • جميع الحقوق محفوظة');
   const [assets, setAssets] = useState<Asset[]>(initialAssets);
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
@@ -219,7 +224,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   return (
     <div className="min-h-screen bg-studio-bg flex flex-col" style={{ overflowAnchor: 'none' }}>
       {/* Studio Header */}
-      <StudioHeader viewerName={viewerName} onLogout={handleLogout} />
+      <StudioHeader viewerName={viewerName} branding={branding} onLogout={handleLogout} />
 
       <main className="mx-auto flex-1 w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         {/* Error notification banner if any operation fails */}
@@ -394,6 +399,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         isOpen={isLightboxOpen}
         onClose={() => setIsLightboxOpen(false)}
         viewerName={viewerName}
+        linkId={linkId}
         slug={slug}
         projectId={project.id}
         isApproved={selectedAsset ? isAssetApproved(selectedAsset) : false}
@@ -403,9 +409,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         allowFeedback={project.allow_feedback !== false}
       />
 
-      <footer className="mt-12 border-t border-white/5 bg-studio-bg py-6 text-center text-xs text-studio-text-muted">
-        استوديو التصميم التلفزيوني والإعلامي • جميع الحقوق محفوظة
-      </footer>
+      {footerText && (
+        <footer className="mt-12 border-t border-white/5 bg-studio-bg py-6 text-center text-xs text-studio-text-muted">
+          {footerText}
+        </footer>
+      )}
     </div>
   );
 };

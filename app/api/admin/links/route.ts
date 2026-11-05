@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getAdminSession, extractCookieFromRequest } from '@/lib/auth/session';
 import { dataService } from '@/lib/data/service';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
+import { normalizeBrandingInput } from '@/lib/branding';
+import { mapLinkError } from './errors';
 
 export async function GET(req: Request) {
   const adminToken = extractCookieFromRequest(req, 'admin_session');
@@ -31,22 +33,31 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { viewerName, password, projectIds } = await req.json();
+    const body = await req.json();
+    const { viewerName, password, projectIds } = body;
 
-    if (!viewerName || !viewerName.trim()) {
+    if (!viewerName || typeof viewerName !== 'string' || !viewerName.trim()) {
       return NextResponse.json({ error: 'اسم العميل مطلوب' }, { status: 400 });
     }
 
     const passwordStr = typeof password === 'string' ? password.trim() : '';
+    const branding = normalizeBrandingInput({
+      brandingMode: body.brandingMode,
+      brandName: body.brandName,
+      hideViewerName: body.hideViewerName,
+    });
 
     const link = await dataService.createAccessLink(
       viewerName.trim(),
       passwordStr,
-      Array.isArray(projectIds) ? projectIds : []
+      Array.isArray(projectIds) ? projectIds : [],
+      branding
     );
 
     return NextResponse.json({ success: true, link });
   } catch (error: any) {
+    const mapped = mapLinkError(error);
+    if (mapped) return mapped;
     console.error('Create link error:', error);
     return NextResponse.json({ error: error?.message || 'تعذر إنشاء رابط الوصول' }, { status: 500 });
   }

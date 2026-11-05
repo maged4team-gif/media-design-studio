@@ -137,7 +137,15 @@ export type AccessLink = {
   created_at: string;
   project_ids?: string[];
   has_password?: boolean;
+  /** Page identity shown to the recipient (migration 013). Missing = 'studio'. */
+  branding_mode?: BrandingMode;
+  /** Display name when branding_mode = 'custom'. */
+  brand_name?: string | null;
+  /** Recipient never sees viewer_name (it stays an admin-only label). */
+  hide_viewer_name?: boolean;
 };
+
+export type BrandingMode = 'studio' | 'neutral' | 'custom';
 
 export type AccessLinkProject = {
   access_link_id: string;

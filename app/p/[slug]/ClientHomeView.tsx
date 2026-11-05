@@ -7,18 +7,24 @@ import { ProjectCard } from '@/components/client/ProjectCard';
 import { matchesArabicSearch } from '@/lib/utils/arabic';
 import { useRouter } from 'next/navigation';
 import { FolderKanban } from 'lucide-react';
+import { buildClientFooterText, resolveLinkBranding, type LinkBranding } from '@/lib/branding';
 
 interface ClientHomeViewProps {
-  viewerName: string;
+  /** null when the link hides the recipient's name. */
+  viewerName: string | null;
   slug: string;
   projects: Project[];
+  branding?: LinkBranding;
 }
 
 export const ClientHomeView: React.FC<ClientHomeViewProps> = ({
   viewerName,
   slug,
   projects,
+  branding = resolveLinkBranding(null),
 }) => {
+  const isStudio = branding.mode === 'studio';
+  const footerText = buildClientFooterText(branding, 'استوديو التصميم • جميع الحقوق محفوظة');
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('الكل');
@@ -70,6 +76,7 @@ export const ClientHomeView: React.FC<ClientHomeViewProps> = ({
       {/* Studio Header */}
       <StudioHeader
         viewerName={viewerName}
+        branding={branding}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         categories={categories}
@@ -85,14 +92,16 @@ export const ClientHomeView: React.FC<ClientHomeViewProps> = ({
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-studio-blue" />
             <span className="text-xs font-semibold tracking-wider text-studio-blue-glow">
-              معرض المشاريع المعتمد
+              {isStudio ? 'معرض المشاريع المعتمد' : 'الملفات المشتركة معك'}
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-white">
-            مشاريع التصميم والإنتاج
+            {isStudio ? 'مشاريع التصميم والإنتاج' : 'المشاريع'}
           </h1>
           <p className="text-sm text-studio-text-secondary max-w-2xl">
-            استعرض مسار تنفيذ هويات القنوات والباقات التلفزيونية، شاهد العروض، وشارك ملاحظاتك واعتماداتك بسهولة وسرعة.
+            {isStudio
+              ? 'استعرض مسار تنفيذ هويات القنوات والباقات التلفزيونية، شاهد العروض، وشارك ملاحظاتك واعتماداتك بسهولة وسرعة.'
+              : 'اختر مشروعاً لاستعراض ملفاته ومشاهدتها وتحميلها.'}
           </p>
         </div>
 
@@ -125,10 +134,12 @@ export const ClientHomeView: React.FC<ClientHomeViewProps> = ({
         )}
       </main>
 
-      {/* Minimal Footer */}
-      <footer className="border-t border-white/5 bg-studio-bg py-6 text-center text-xs text-studio-text-muted">
-        استوديو التصميم • جميع الحقوق محفوظة
-      </footer>
+      {/* Minimal Footer (none in neutral mode) */}
+      {footerText && (
+        <footer className="border-t border-white/5 bg-studio-bg py-6 text-center text-xs text-studio-text-muted">
+          {footerText}
+        </footer>
+      )}
     </div>
   );
 };

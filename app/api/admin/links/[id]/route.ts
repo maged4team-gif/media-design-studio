@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getAdminSession, extractCookieFromRequest } from '@/lib/auth/session';
 import { dataService } from '@/lib/data/service';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
+import { normalizeBrandingInput } from '@/lib/branding';
+import { mapLinkError } from '../errors';
 
 interface RouteProps {
   params: Promise<{
@@ -24,16 +26,28 @@ export async function PATCH(req: Request, { params }: RouteProps) {
 
   try {
     const body = await req.json();
+    if (body.viewerName !== undefined && (typeof body.viewerName !== 'string' || !body.viewerName.trim())) {
+      return NextResponse.json({ error: 'اسم العميل مطلوب' }, { status: 400 });
+    }
+    const branding = normalizeBrandingInput({
+      brandingMode: body.brandingMode,
+      brandName: body.brandName,
+      hideViewerName: body.hideViewerName,
+    });
+
     const success = await dataService.updateAccessLink(id, {
-      viewerName: body.viewerName,
+      viewerName: typeof body.viewerName === 'string' ? body.viewerName.trim() : undefined,
       passwordPlain: body.password,
       projectIds: body.projectIds,
       enabled: body.enabled,
       removePassword: body.removePassword,
+      branding,
     });
 
     return NextResponse.json({ success });
   } catch (error: any) {
+    const mapped = mapLinkError(error);
+    if (mapped) return mapped;
     console.error('Update link error:', error);
     return NextResponse.json({ error: error?.message || 'تعذر تعديل رابط الوصول' }, { status: 500 });
   }

@@ -2,13 +2,16 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Lock, ArrowLeft, Globe } from 'lucide-react';
+import { STUDIO_BRAND, type LinkBranding } from '@/lib/branding';
 
 interface PasswordGateProps {
-  viewerName: string;
+  /** null when the link hides the recipient's name. */
+  viewerName: string | null;
   slug: string;
   redirectTo?: string;
   projectTitle?: string;
   isPublic?: boolean;
+  branding?: LinkBranding;
 }
 
 export const PasswordGate: React.FC<PasswordGateProps> = ({
@@ -17,7 +20,10 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
   redirectTo,
   projectTitle,
   isPublic = false,
+  branding,
 }) => {
+  const accessLabel = isPublic ? 'رابط عام مصرح به' : 'وصول خاص وآمن';
+  const footerBrand = !branding || branding.showStudioIdentity ? STUDIO_BRAND.name : branding.brandName;
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(isPublic);
@@ -112,7 +118,7 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
 
           {/* Greeting per specification */}
           <h1 className="mt-5 text-2xl font-bold text-white">
-            مرحباً {viewerName}
+            {viewerName ? `مرحباً ${viewerName}` : 'مرحباً بك'}
           </h1>
           <p className="mt-2 text-sm text-studio-text-secondary">
             {isPublic
@@ -230,7 +236,7 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({
         )}
 
         <div className="mt-8 text-center text-[11px] text-studio-text-muted">
-          استوديو التصميم • {isPublic ? 'رابط عام مصرح به' : 'وصول خاص وآمن'}
+          {footerBrand ? `${footerBrand} • ${accessLabel}` : accessLabel}
         </div>
       </div>
     </div>

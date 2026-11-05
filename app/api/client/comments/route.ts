@@ -3,6 +3,7 @@ import { dataService } from '@/lib/data/service';
 import { authorizeClientAsset } from '@/lib/auth/authorize';
 import { extractCookieFromRequest } from '@/lib/auth/session';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
+import { HIDDEN_VIEWER_LABEL } from '@/lib/branding';
 
 export async function POST(req: Request) {
   // 1. CSRF Verification
@@ -45,7 +46,10 @@ export async function POST(req: Request) {
       typeof timestampSeconds === 'number' && timestampSeconds >= 0 ? timestampSeconds : null
     );
 
-    return NextResponse.json({ success: true, comment });
+    // Hidden-name links: the stored author stays the admin label, the browser sees a neutral one
+    const visibleComment = auth.link.hide_viewer_name ? { ...comment, author_name: HIDDEN_VIEWER_LABEL } : comment;
+
+    return NextResponse.json({ success: true, comment: visibleComment });
   } catch (error: any) {
     console.error('Comment submission error:', error);
     return NextResponse.json(

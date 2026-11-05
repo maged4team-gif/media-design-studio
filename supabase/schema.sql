@@ -58,6 +58,9 @@ CREATE TABLE IF NOT EXISTS access_links (
     password_plain TEXT,
     enabled BOOLEAN NOT NULL DEFAULT true,
     session_version INTEGER NOT NULL DEFAULT 1,
+    branding_mode VARCHAR(16) NOT NULL DEFAULT 'studio' CHECK (branding_mode IN ('studio', 'neutral', 'custom')),
+    brand_name VARCHAR(80),
+    hide_viewer_name BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 

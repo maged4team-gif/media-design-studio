@@ -4,6 +4,12 @@ import React, { useState } from 'react';
 import { Project, AccessLink } from '@/lib/supabase/database.types';
 import { AdminNavbar } from '@/components/admin/AdminNavbar';
 import {
+  LinkBrandingFields,
+  DEFAULT_LINK_BRANDING,
+  describeLinkBranding,
+  type LinkBrandingState,
+} from '@/components/admin/LinkBrandingFields';
+import {
   Link2,
   PlusCircle,
   Copy,
@@ -37,6 +43,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
   const [password, setPassword] = useState('');
   const [isPublic, setIsPublic] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [branding, setBranding] = useState<LinkBrandingState>(DEFAULT_LINK_BRANDING);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -58,6 +65,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
   const [editPassword, setEditPassword] = useState('');
   const [editIsPublic, setEditIsPublic] = useState(false);
   const [editSelectedProjectIds, setEditSelectedProjectIds] = useState<string[]>([]);
+  const [editBranding, setEditBranding] = useState<LinkBrandingState>(DEFAULT_LINK_BRANDING);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
 
@@ -67,8 +75,21 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
     setEditPassword(link.password_plain || '');
     setEditIsPublic(link.has_password === false);
     setEditSelectedProjectIds(link.project_ids || []);
+    setEditBranding({
+      brandingMode: link.branding_mode || 'studio',
+      brandName: link.brand_name || '',
+      hideViewerName: Boolean(link.hide_viewer_name),
+    });
     setEditError('');
   };
+
+  const brandingPayload = (b: LinkBrandingState) => ({
+    brandingMode: b.brandingMode,
+    brandName: b.brandingMode === 'custom' ? b.brandName.trim() : null,
+    hideViewerName: b.hideViewerName,
+  });
+
+  const isBrandingIncomplete = (b: LinkBrandingState) => b.brandingMode === 'custom' && !b.brandName.trim();
 
   const handleToggleAllEditProjects = () => {
     if (editSelectedProjectIds.length === projects.length) {
@@ -96,13 +117,15 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
 
   const handleCopyInviteMessage = async (link: AccessLink & { project_ids: string[] }) => {
     const fullUrl = `${window.location.origin}/p/${link.slug}`;
+    // Hidden-name links get a generic greeting so the message can be forwarded to anyone
+    const greeting = link.hide_viewer_name ? 'مرحباً،' : `مرحباً ${link.viewer_name}،`;
     let message = '';
     if (link.has_password !== false && link.password_plain) {
-      message = `مرحباً ${link.viewer_name}،\nيمكنك الاطلاع على ملفاتك عبر الرابط التالي:\n🔗 الرابط: ${fullUrl}\n🔑 كلمة المرور: ${link.password_plain}`;
+      message = `${greeting}\nيمكنك الاطلاع على الملفات عبر الرابط التالي:\n🔗 الرابط: ${fullUrl}\n🔑 كلمة المرور: ${link.password_plain}`;
     } else if (link.has_password !== false && !link.password_plain) {
-      message = `مرحباً ${link.viewer_name}،\nيمكنك الاطلاع على ملفاتك عبر الرابط التالي:\n🔗 الرابط: ${fullUrl}\n🔒 (الرابط محمي بكلمة المرور الخاصة بك)`;
+      message = `${greeting}\nيمكنك الاطلاع على الملفات عبر الرابط التالي:\n🔗 الرابط: ${fullUrl}\n🔒 (الرابط محمي بكلمة مرور)`;
     } else {
-      message = `مرحباً ${link.viewer_name}،\nيمكنك الاطلاع على ملفاتك عبر الرابط المباشر التالي:\n🔗 الرابط: ${fullUrl}`;
+      message = `${greeting}\nيمكنك الاطلاع على الملفات عبر الرابط المباشر التالي:\n🔗 الرابط: ${fullUrl}`;
     }
 
     try {
@@ -121,6 +144,10 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
       setEditError('يرجى كتابة كلمة المرور أو تفعيل الرابط العام');
       return;
     }
+    if (isBrandingIncomplete(editBranding)) {
+      setEditError('يرجى كتابة الاسم المخصص الذي سيظهر للمستلم');
+      return;
+    }
 
     setEditSaving(true);
     setEditError('');
@@ -129,6 +156,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
       const payload: any = {
         viewerName: editViewerName.trim(),
         projectIds: editSelectedProjectIds,
+        ...brandingPayload(editBranding),
       };
 
       if (editIsPublic) {
@@ -162,6 +190,9 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
               project_ids: editSelectedProjectIds,
               has_password: !editIsPublic,
               password_plain: newPlain,
+              branding_mode: editBranding.brandingMode,
+              brand_name: editBranding.brandingMode === 'custom' ? editBranding.brandName.trim() : null,
+              hide_viewer_name: editBranding.hideViewerName,
             };
           })
         );
@@ -193,6 +224,10 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
   const handleCreateLink = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!viewerName.trim() || (!isPublic && !password.trim()) || saving) return;
+    if (isBrandingIncomplete(branding)) {
+      setError('يرجى كتابة الاسم المخصص الذي سيظهر للمستلم');
+      return;
+    }
 
     setSaving(true);
     setError('');
@@ -205,6 +240,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
           viewerName: viewerName.trim(),
           password: isPublic ? '' : password.trim(),
           projectIds: selectedProjectIds,
+          ...brandingPayload(branding),
         }),
       });
 
@@ -218,6 +254,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
         setPassword('');
         setIsPublic(false);
         setSelectedProjectIds([]);
+        setBranding(DEFAULT_LINK_BRANDING);
       }
     } catch {
       setError('حدث خطأ في الاتصال بالخادم');
@@ -335,6 +372,18 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
                         <span className="text-[11px] text-studio-text-muted font-mono">
                           /p/{link.slug}
                         </span>
+                        {describeLinkBranding(link).length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {describeLinkBranding(link).map((tag) => (
+                              <span
+                                key={tag}
+                                className="rounded-md border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-300"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -581,7 +630,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
         {/* Create Client Link Modal */}
         {showCreateModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-            <div className="glass-card relative w-full max-w-lg rounded-2xl border border-white/10 p-6 sm:p-8 shadow-2xl">
+            <div className="glass-card relative w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-2xl border border-white/10 p-6 sm:p-8 shadow-2xl">
               <h3 className="text-lg font-bold text-white mb-1">إنشاء رابط وصول عميل</h3>
               <p className="text-xs text-studio-text-secondary mb-6">
                 توليد رابط مخصص للعميل للوصول للمشاريع المصرح بها
@@ -599,6 +648,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
                 <div>
                   <label htmlFor="create-link-viewer-name" className="block text-xs font-semibold text-white mb-1.5">
                     اسم العميل <span className="text-red-400">*</span>
+                    <span className="mr-1 text-[10px] font-normal text-studio-text-muted">(للتعريف عندك؛ يمكن إخفاؤه عن المستلم)</span>
                   </label>
                   <input
                     id="create-link-viewer-name"
@@ -669,6 +719,9 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
                   </div>
                 )}
 
+                {/* Page identity & viewer-name visibility */}
+                <LinkBrandingFields idPrefix="create-link" value={branding} onChange={setBranding} />
+
                 {/* Projects Assignment */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -730,7 +783,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
         {/* Edit Client Link Modal */}
         {editingLink && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-            <div className="glass-card relative w-full max-w-lg rounded-2xl border border-white/10 p-6 sm:p-8 shadow-2xl">
+            <div className="glass-card relative w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-2xl border border-white/10 p-6 sm:p-8 shadow-2xl">
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-lg font-bold text-white">تعديل رابط العميل</h3>
                 <span className="font-mono text-xs text-studio-text-muted">/p/{editingLink.slug}</span>
@@ -751,6 +804,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
                 <div>
                   <label htmlFor="edit-link-viewer-name" className="block text-xs font-semibold text-white mb-1.5">
                     اسم العميل <span className="text-red-400">*</span>
+                    <span className="mr-1 text-[10px] font-normal text-studio-text-muted">(للتعريف عندك؛ يمكن إخفاؤه عن المستلم)</span>
                   </label>
                   <input
                     id="edit-link-viewer-name"
@@ -819,6 +873,9 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
                     <span>سيتم تحويل الرابط إلى رابط عام وإلغاء حمايته بكلمة مرور.</span>
                   </div>
                 )}
+
+                {/* Page identity & viewer-name visibility */}
+                <LinkBrandingFields idPrefix="edit-link" value={editBranding} onChange={setEditBranding} />
 
                 {/* Projects Assignment */}
                 <div>

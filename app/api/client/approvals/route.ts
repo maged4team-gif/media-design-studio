@@ -3,6 +3,7 @@ import { dataService } from '@/lib/data/service';
 import { authorizeClientAsset } from '@/lib/auth/authorize';
 import { extractCookieFromRequest } from '@/lib/auth/session';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
+import { HIDDEN_VIEWER_LABEL } from '@/lib/branding';
 
 export async function POST(req: Request) {
   // 1. CSRF Verification
@@ -44,7 +45,10 @@ export async function POST(req: Request) {
       approved
     );
 
-    return NextResponse.json({ success: true, approval });
+    const visibleApproval =
+      auth.link.hide_viewer_name && approval ? { ...approval, viewer_name: HIDDEN_VIEWER_LABEL } : approval;
+
+    return NextResponse.json({ success: true, approval: visibleApproval });
   } catch (error: any) {
     console.error('Approval toggle error:', error);
     return NextResponse.json(

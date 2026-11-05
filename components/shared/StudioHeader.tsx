@@ -1,10 +1,14 @@
 'use client';
 
 import React from 'react';
-import { Tv, Search, Shield, LogOut } from 'lucide-react';
+import { Tv, Search, Shield, LogOut, FolderOpen } from 'lucide-react';
+import { STUDIO_BRAND, type LinkBranding } from '@/lib/branding';
 
 interface StudioHeaderProps {
-  viewerName?: string;
+  /** Omitted/null = no name chip (hidden-name links pass null). */
+  viewerName?: string | null;
+  /** Page identity; omitted = studio identity. */
+  branding?: LinkBranding;
   searchQuery?: string;
   onSearchChange?: (q: string) => void;
   categories?: string[];
@@ -16,6 +20,7 @@ interface StudioHeaderProps {
 
 export const StudioHeader: React.FC<StudioHeaderProps> = ({
   viewerName,
+  branding,
   searchQuery = '',
   onSearchChange,
   categories = [],
@@ -29,24 +34,36 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
       <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
         {/* Top Branding Row */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          {/* Logo & Studio Identity */}
-          <div className="flex items-center gap-3.5">
-            <div className="relative flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-studio-blue to-studio-blue-subtle text-white shadow-lg shadow-studio-blue/20">
-              <Tv className="h-6 w-6 stroke-[2.2]" />
-              <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-studio-bg bg-studio-gold" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-lg font-bold tracking-tight text-white">
-                  استوديو التصميم
-                </span>
-                <span className="rounded bg-studio-blue/15 px-2 py-0.5 text-[11px] font-semibold text-studio-blue-glow">
-                  PORTFOLIO
-                </span>
+          {/* Logo & Identity */}
+          {!branding || branding.showStudioIdentity ? (
+            <div className="flex items-center gap-3.5">
+              <div className="relative flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-studio-blue to-studio-blue-subtle text-white shadow-lg shadow-studio-blue/20">
+                <Tv className="h-6 w-6 stroke-[2.2]" />
+                <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-studio-bg bg-studio-gold" />
               </div>
-              <p className="text-xs text-studio-text-muted">Broadcast & Motion Design Showcase</p>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-bold tracking-tight text-white">
+                    {STUDIO_BRAND.name}
+                  </span>
+                  <span className="rounded bg-studio-blue/15 px-2 py-0.5 text-[11px] font-semibold text-studio-blue-glow">
+                    {STUDIO_BRAND.badge}
+                  </span>
+                </div>
+                <p className="text-xs text-studio-text-muted">{STUDIO_BRAND.tagline}</p>
+              </div>
             </div>
-          </div>
+          ) : (
+            /* Neutral / custom identity: generic icon, no studio name, badge or tagline */
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-studio-surface text-studio-blue-glow">
+                <FolderOpen className="h-5 w-5" />
+              </div>
+              <span className="text-lg font-bold tracking-tight text-white">
+                {branding.brandName || 'ملفات مشتركة'}
+              </span>
+            </div>
+          )}
 
           {/* User / Viewer Session Info & Actions */}
           <div className="flex items-center gap-3">

@@ -23,7 +23,10 @@ interface MediaLightboxProps {
   asset: Asset | null;
   isOpen: boolean;
   onClose: () => void;
-  viewerName: string;
+  /** null when the link hides the recipient's name. */
+  viewerName: string | null;
+  /** The viewer's access link: own comments are matched by link, not by name. */
+  linkId?: string;
   slug: string;
   projectId: string;
   isApproved: boolean;
@@ -38,6 +41,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
   isOpen,
   onClose,
   viewerName,
+  linkId,
   slug,
   projectId,
   isApproved,
@@ -172,7 +176,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/80 backdrop-blur-sm animate-fade-in text-center p-4">
                   <div className="h-10 w-10 animate-spin rounded-full border-2 border-studio-blue border-t-transparent" />
                   <p className="text-sm font-semibold text-white">جارٍ تجهيز مشغل الفيديو...</p>
-                  <p className="text-xs text-studio-text-muted">يتم تحميل البث بجودة الاستوديو العالية</p>
+                  <p className="text-xs text-studio-text-muted">يتم تحميل البث بجودة عالية</p>
                 </div>
               )}
 
@@ -335,7 +339,10 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
               </div>
             ) : (
               asset.comments.map((comment: Comment) => {
-                const isClient = comment.author_name === viewerName;
+                const isClient =
+                  linkId && comment.access_link_id
+                    ? comment.access_link_id === linkId
+                    : viewerName !== null && comment.author_name === viewerName;
                 return (
                   <div
                     key={comment.id}
@@ -400,7 +407,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
                   setCommentText(e.target.value);
                   if (commentError) setCommentError('');
                 }}
-                placeholder={`أضف ملاحظتك باسم "${viewerName}"...`}
+                placeholder={viewerName ? `أضف ملاحظتك باسم "${viewerName}"...` : 'أضف ملاحظتك...'}
                 rows={2}
                 className="w-full resize-none rounded-xl border border-white/10 bg-studio-card p-3 text-xs text-white placeholder-studio-text-muted outline-none transition focus:border-studio-blue focus:ring-1 focus:ring-studio-blue focus-visible:ring-2 focus-visible:ring-studio-blue"
               />
