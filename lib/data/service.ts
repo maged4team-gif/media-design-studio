@@ -2,6 +2,7 @@ import 'server-only';
 import { getServerSupabase, isServerSupabaseConfigured, isSupabaseHealthy, reportSupabaseFailure, reportSupabaseSuccess } from '@/lib/supabase/server';
 import { Project, Asset, AccessLink, Comment, Approval, StudioNotification, ProjectStatus } from '@/lib/supabase/database.types';
 import bcrypt from 'bcryptjs';
+import { sealLinkPassword, sealIfNeeded, isSealedLinkPassword, revealLinkPassword } from '@/lib/auth/link-password-vault';
 import { generateSlug } from '@/lib/utils/slug';
 import { deleteDriveFileOrFolder } from '@/lib/drive/client';
 import fs from 'fs';
@@ -109,11 +110,27 @@ function saveLinkPasswordLocal(linkId: string, passwordPlain: string | null) {
     if (passwordPlain === null) {
       delete existing[linkId];
     } else {
-      existing[linkId] = passwordPlain;
+      // Never persist the readable password in plain text
+      existing[linkId] = sealLinkPassword(passwordPlain);
     }
     fs.writeFileSync(p, JSON.stringify(existing, null, 2), 'utf8');
   } catch (e) {
     console.error('Failed to save local link password:', e);
+  }
+}
+
+/**
+ * One-way migration: re-seals any legacy plain-text entries left in the local
+ * link-passwords.json file by versions that stored them unencrypted.
+ */
+function upgradeLocalLinkPasswords(existing: Record<string, string>): void {
+  const legacyIds = Object.keys(existing).filter((id) => existing[id] && !isSealedLinkPassword(existing[id]));
+  if (legacyIds.length === 0) return;
+  try {
+    for (const id of legacyIds) existing[id] = sealLinkPassword(existing[id]);
+    fs.writeFileSync(path.join(getDataDir(), 'link-passwords.json'), JSON.stringify(existing, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Failed to re-seal legacy local link passwords:', e);
   }
 }
 
@@ -1001,10 +1018,9 @@ export const dataService = {
             data.password_hash !== 'NO_PASSWORD'
           );
 
-          const localPasswords = getLinkPasswordsMap();
+          // Auth data carries ONLY the bcrypt hash; the readable admin copy never reaches the login path
           return {
             ...data,
-            password_plain: (data as any).password_plain || localPasswords[data.id] || null,
             has_password: hasPassword,
           };
         } else if (error) {
@@ -1021,7 +1037,6 @@ export const dataService = {
     const link = store.access_links.find((l) => l.slug === slug);
     if (!link) return null;
 
-    const localPasswords = getLinkPasswordsMap();
     const hasPassword = Boolean(
       link.password_hash &&
       link.password_hash.trim() !== '' &&
@@ -1033,7 +1048,6 @@ export const dataService = {
       viewer_name: link.viewer_name,
       slug: link.slug,
       password_hash: link.password_hash,
-      password_plain: link.password_plain || localPasswords[link.id] || null,
       enabled: link.enabled,
       session_version: link.session_version ?? 1,
       created_at: link.created_at,
@@ -2435,12 +2449,28 @@ export const dataService = {
 
         if (!error && data) {
           const localPasswords = getLinkPasswordsMap();
+          upgradeLocalLinkPasswords(localPasswords);
+
+          // Re-seal legacy rows that still hold a plain-text password_plain
+          const legacyRows = (data || []).filter(
+            (link: any) => link.password_plain && !isSealedLinkPassword(link.password_plain)
+          );
+          for (const link of legacyRows as any[]) {
+            const { error: sealErr } = await supabase
+              .from('access_links')
+              .update({ password_plain: sealLinkPassword(link.password_plain) })
+              .eq('id', link.id);
+            if (sealErr) {
+              console.warn('[Security Warning] Could not re-seal legacy link password:', sealErr.message);
+            }
+          }
+
           return (data || []).map((link: any) => ({
             id: link.id,
             viewer_name: link.viewer_name,
             slug: link.slug,
             password_hash: '', // Never leak password hash to admin view
-            password_plain: link.password_plain || localPasswords[link.id] || null,
+            password_plain: revealLinkPassword(link.password_plain || localPasswords[link.id]),
             has_password: Boolean(link.password_hash && link.password_hash.trim() !== '' && link.password_hash !== 'NO_PASSWORD'),
             enabled: link.enabled,
             session_version: link.session_version ?? 1,
@@ -2456,10 +2486,17 @@ export const dataService = {
     }
 
     const store = getLocalStore();
+
+    // Re-seal legacy plain-text passwords in the local demo store
+    if (store.access_links.some((l) => l.password_plain && !isSealedLinkPassword(l.password_plain))) {
+      for (const l of store.access_links) l.password_plain = sealIfNeeded(l.password_plain);
+      saveLocalStore(store);
+    }
+
     return store.access_links.map((l) => ({
       ...l,
       password_hash: '', // Never leak password hash
-      password_plain: l.password_plain || null,
+      password_plain: revealLinkPassword(l.password_plain),
       has_password: Boolean(l.password_hash && l.password_hash.trim() !== '' && l.password_hash !== 'NO_PASSWORD'),
     }));
   },
@@ -2477,7 +2514,7 @@ export const dataService = {
           viewer_name: viewerName,
           slug,
           password_hash: passwordHash,
-          password_plain: cleanPassword,
+          password_plain: cleanPassword ? sealLinkPassword(cleanPassword) : null,
           enabled: true,
           session_version: 1,
         };
@@ -2537,7 +2574,7 @@ export const dataService = {
       viewer_name: viewerName,
       slug,
       password_hash: passwordHash,
-      password_plain: cleanPassword,
+      password_plain: cleanPassword ? sealLinkPassword(cleanPassword) : null,
       enabled: true,
       session_version: 1,
       created_at: new Date().toISOString(),
@@ -2593,7 +2630,7 @@ export const dataService = {
               }
             } else if (data.passwordPlain && data.passwordPlain.trim() !== '') {
               saveLinkPasswordLocal(id, data.passwordPlain.trim());
-              const { error: plainErr } = await supabase.from('access_links').update({ password_plain: data.passwordPlain.trim() }).eq('id', id);
+              const { error: plainErr } = await supabase.from('access_links').update({ password_plain: sealLinkPassword(data.passwordPlain.trim()) }).eq('id', id);
               if (plainErr && plainErr.code !== '42703' && !plainErr.message?.includes('password_plain')) {
                 console.warn('Could not update password_plain:', plainErr.message);
               }
@@ -2629,7 +2666,7 @@ export const dataService = {
         link.session_version = (link.session_version ?? 1) + 1;
       } else if (data.passwordPlain && data.passwordPlain.trim() !== '') {
         link.password_hash = await bcrypt.hash(data.passwordPlain.trim(), 10);
-        link.password_plain = data.passwordPlain.trim();
+        link.password_plain = sealLinkPassword(data.passwordPlain.trim());
         saveLinkPasswordLocal(id, data.passwordPlain.trim());
         link.session_version = (link.session_version ?? 1) + 1;
       }

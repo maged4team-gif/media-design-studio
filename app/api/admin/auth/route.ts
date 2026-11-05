@@ -5,11 +5,13 @@ import {
   setAdminSession,
   clearAdminSession,
 } from '@/lib/auth/session';
-import { checkRateLimit, recordRateLimitAttempt, resetRateLimit } from '@/lib/auth/rate-limit';
+import { checkRateLimit, recordRateLimitAttempt, resetRateLimit, getClientIp } from '@/lib/auth/rate-limit';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+const ADMIN_GLOBAL_RATE_KEY = 'admin_auth:global';
 
 export async function POST(req: Request) {
   // Safe diagnostic logging as requested by user (never logs password itself)
@@ -21,9 +23,12 @@ export async function POST(req: Request) {
   }
 
   // 2. Rate Limiting for Admin Login (5 attempts per 15 minutes)
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'local_admin';
+  const ip = getClientIp(req, 'local_admin');
   const rateLimitKey = `admin_auth:${ip}`;
-  const rateCheck = checkRateLimit(rateLimitKey, 5, 15 * 60 * 1000);
+  const ipRateCheck = checkRateLimit(rateLimitKey, 5, 15 * 60 * 1000);
+  // Global cap across ALL IPs: spoofed forwarding headers cannot multiply the attempt budget
+  const globalRateCheck = checkRateLimit(ADMIN_GLOBAL_RATE_KEY, 20, 15 * 60 * 1000);
+  const rateCheck = ipRateCheck.allowed ? globalRateCheck : ipRateCheck;
 
   if (!rateCheck.allowed) {
     return NextResponse.json(
@@ -52,11 +57,13 @@ export async function POST(req: Request) {
 
     if (!verifyAdminPassword(password)) {
       recordRateLimitAttempt(rateLimitKey);
+      recordRateLimitAttempt(ADMIN_GLOBAL_RATE_KEY);
       return NextResponse.json({ error: 'كلمة مرور الإدارة غير صحيحة' }, { status: 401 });
     }
 
     // Reset rate limiter on successful authentication
     resetRateLimit(rateLimitKey);
+    resetRateLimit(ADMIN_GLOBAL_RATE_KEY);
 
     await setAdminSession();
     return NextResponse.json({ success: true });

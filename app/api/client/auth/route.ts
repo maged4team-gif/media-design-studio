@@ -1,12 +1,24 @@
 import { NextResponse } from 'next/server';
 import { dataService } from '@/lib/data/service';
 import { setClientSession, clearClientSession } from '@/lib/auth/session';
-import { checkRateLimit, recordRateLimitAttempt, resetRateLimit } from '@/lib/auth/rate-limit';
+import { checkRateLimit, recordRateLimitAttempt, resetRateLimit, getClientIp } from '@/lib/auth/rate-limit';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
 import bcrypt from 'bcryptjs';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+const RATE_WINDOW_MS = 15 * 60 * 1000;
+const PER_LINK_MAX_FAILURES = 10;
+
+function rateLimitedResponse(retryAfterSeconds?: number) {
+  return NextResponse.json(
+    {
+      error: `تم تجاوز الحد المسموح من المحاولات. يرجى المحاولة بعد ${retryAfterSeconds} ثانية.`,
+    },
+    { status: 429, headers: retryAfterSeconds ? { 'Retry-After': String(retryAfterSeconds) } : undefined }
+  );
+}
 
 export async function POST(req: Request) {
   // 1. CSRF Origin Verification
@@ -14,18 +26,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'طلب غير مصرح به (CSRF Origin Mismatch)' }, { status: 403 });
   }
 
-  // 2. Client IP Rate Limiting (5 attempts per 15 minutes)
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'local_client';
+  // 2. Client IP Rate Limiting (5 failed attempts per 15 minutes per IP)
+  const ip = getClientIp(req, 'local_client');
   const rateLimitKey = `client_auth:${ip}`;
-  const rateCheck = checkRateLimit(rateLimitKey, 5, 15 * 60 * 1000);
+  const rateCheck = checkRateLimit(rateLimitKey, 5, RATE_WINDOW_MS);
 
   if (!rateCheck.allowed) {
-    return NextResponse.json(
-      {
-        error: `تم تجاوز الحد المسموح من المحاولات. يرجى المحاولة بعد ${rateCheck.retryAfterSeconds} ثانية.`,
-      },
-      { status: 429 }
-    );
+    return rateLimitedResponse(rateCheck.retryAfterSeconds);
   }
 
   try {
@@ -51,6 +58,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'معرّف الرابط غير صالح' }, { status: 400 });
     }
 
+    // 3. Per-link cap across ALL IPs. Forwarded IP headers can be spoofed to dodge
+    // the per-IP limit, so each link also gets a global failed-attempt budget.
+    const slugRateLimitKey = `client_auth_slug:${slug}`;
+    const slugRateCheck = checkRateLimit(slugRateLimitKey, PER_LINK_MAX_FAILURES, RATE_WINDOW_MS);
+    if (!slugRateCheck.allowed) {
+      return rateLimitedResponse(slugRateCheck.retryAfterSeconds);
+    }
+
     const link = await dataService.getAccessLinkAuthDataBySlug(slug);
     // Generic safe error message to prevent link enumeration / probing attacks
     if (!link || !link.enabled) {
@@ -69,27 +84,29 @@ export async function POST(req: Request) {
       const cleanPassword = password.trim();
       let isMatch = false;
 
-      // Resilient multi-tier password verification
-      if (link.password_plain && link.password_plain.trim() === cleanPassword) {
-        isMatch = true;
-      } else if (link.password_hash && typeof link.password_hash === 'string' && link.password_hash.startsWith('$2')) {
+      // Verify strictly against the bcrypt hash. No plain-text comparison paths.
+      if (typeof link.password_hash === 'string' && /^\$2[aby]\$/.test(link.password_hash)) {
         try {
           isMatch = await bcrypt.compare(cleanPassword, link.password_hash);
         } catch {
           isMatch = false;
         }
-      } else if (link.password_hash && link.password_hash === cleanPassword) {
-        isMatch = true;
+      } else {
+        console.error(
+          `[Client Auth] Access link ${link.id} has a non-bcrypt password_hash; login refused. Reset the link password from the admin panel.`
+        );
       }
 
       if (!isMatch) {
         recordRateLimitAttempt(rateLimitKey);
+        recordRateLimitAttempt(slugRateLimitKey);
         return NextResponse.json({ error: 'كلمة المرور غير صحيحة' }, { status: 401 });
       }
     }
 
-    // Reset rate limiter on successful authentication
+    // Reset rate limiters on successful authentication
     resetRateLimit(rateLimitKey);
+    resetRateLimit(slugRateLimitKey);
 
     // Set secure HTTP-only session cookie bound to current session_version
     try {

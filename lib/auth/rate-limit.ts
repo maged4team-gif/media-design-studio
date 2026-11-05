@@ -71,3 +71,17 @@ export function recordRateLimitAttempt(identifier: string): void {
 export function resetRateLimit(identifier: string): void {
   rateLimitMap.delete(identifier);
 }
+
+/**
+ * Best-effort client IP for rate limiting.
+ * Prefers `x-real-ip` (set by Vercel / Nginx from the TCP peer), then the first
+ * `x-forwarded-for` entry. Both can be forged when the app is NOT behind a proxy
+ * that overwrites them, which is why login routes also apply a per-target cap
+ * that does not depend on the IP at all.
+ */
+export function getClientIp(req: Request, fallback: string = 'unknown'): string {
+  const realIp = req.headers.get('x-real-ip')?.trim();
+  if (realIp) return realIp;
+  const forwarded = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+  return forwarded || fallback;
+}

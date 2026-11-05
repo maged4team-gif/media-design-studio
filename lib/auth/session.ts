@@ -1,18 +1,12 @@
 import 'server-only';
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
-
-
+import { getAppSecret } from '@/lib/auth/secret';
 
 function getSessionSecret(): string {
-  const secret = process.env.SESSION_SECRET;
-  if (secret && secret.trim().length >= 16) {
-    return secret.trim();
-  }
-
-  // Cryptographic fallback so session signing never crashes if SESSION_SECRET wasn't configured or is short
-  const fallbackSalt = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_URL || 'media-studio-session-fallback-secret-2027';
-  return crypto.createHash('sha256').update(fallbackSalt + ':studio-session-signing-v1').digest('hex');
+  // Throws CONFIG_ERROR in production when SESSION_SECRET is missing/short:
+  // never sign sessions with a key derivable from public source code.
+  return getAppSecret();
 }
 
 export function isAdminPasswordConfigured(): boolean {

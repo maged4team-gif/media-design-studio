@@ -1,5 +1,6 @@
 import 'server-only';
 import crypto from 'crypto';
+import { getAppSecret } from '@/lib/auth/secret';
 import { getServerSupabase } from '@/lib/supabase/server';
 
 export interface DriveCredentialsRecord {
@@ -13,10 +14,13 @@ export interface DriveCredentialsRecord {
  * Uses DRIVE_CREDENTIALS_ENCRYPTION_KEY, falling back to SESSION_SECRET.
  */
 function getEncryptionKey(): Buffer {
+  // Raw SESSION_SECRET (untrimmed) is kept as the fallback so refresh tokens
+  // already encrypted with it remain decryptable. The hardcoded public
+  // fallback is gone: getAppSecret() throws in production when unset.
   const rawKey =
     process.env.DRIVE_CREDENTIALS_ENCRYPTION_KEY ||
     process.env.SESSION_SECRET ||
-    'fallback-secure-encryption-key-for-drive-studio-2027';
+    getAppSecret();
 
   return crypto.createHash('sha256').update(rawKey).digest();
 }

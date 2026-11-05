@@ -1,5 +1,6 @@
 import 'server-only';
 import crypto from 'crypto';
+import { getAppSecret } from '@/lib/auth/secret';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -245,7 +246,7 @@ export function createUploadSessionTicket(params: {
   adminSessionToken: string;
   projectFolderId: string;
 }): string {
-  const secret = process.env.SESSION_SECRET || 'dev-local-session-secret-salt-2027';
+  const secret = getAppSecret();
 
   // Strict SSRF check: Ensure sessionUrl strictly targets Google Drive Resumable Upload
   const parsed = new URL(params.sessionUrl);
@@ -281,7 +282,7 @@ export function verifyUploadSessionTicket(
   ticketString: string,
   adminSessionToken: string
 ): UploadSessionTicket {
-  const secret = process.env.SESSION_SECRET || 'dev-local-session-secret-salt-2027';
+  const secret = getAppSecret();
   const parts = ticketString.split('.');
   if (parts.length !== 2) {
     throw new Error('INVALID_TICKET: Malformed upload ticket format.');
@@ -345,7 +346,7 @@ export async function verifyDriveConnection(): Promise<{ ok: boolean; rootFolder
  * Generates an HMAC-signed anti-CSRF state bound to the admin session
  */
 export function generateOAuthState(adminSessionToken: string): string {
-  const secret = process.env.SESSION_SECRET || 'dev-local-session-secret-salt-2027';
+  const secret = getAppSecret();
   const timestamp = Date.now().toString();
   const nonce = crypto.randomBytes(16).toString('hex');
   const payload = `${timestamp}:${nonce}:${crypto.createHash('sha256').update(adminSessionToken).digest('hex')}`;
@@ -358,7 +359,7 @@ export function generateOAuthState(adminSessionToken: string): string {
  */
 export function verifyOAuthState(state: string, adminSessionToken: string): boolean {
   try {
-    const secret = process.env.SESSION_SECRET || 'dev-local-session-secret-salt-2027';
+    const secret = getAppSecret();
     const decoded = Buffer.from(state, 'base64url').toString('utf8');
     const parts = decoded.split(':');
     if (parts.length !== 4) return false;
