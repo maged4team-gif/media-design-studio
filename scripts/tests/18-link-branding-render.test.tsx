@@ -14,6 +14,7 @@ import { ClientHomeView } from '../../app/p/[slug]/ClientHomeView';
 import { ProjectDetailView } from '../../app/p/[slug]/projects/[projectId]/ProjectDetailView';
 import { StudioHeader } from '../../components/shared/StudioHeader';
 import { LinkBrandingFields, DEFAULT_LINK_BRANDING } from '../../components/admin/LinkBrandingFields';
+import { LinkIdentityQuickEdit } from '../../components/admin/LinkIdentityQuickEdit';
 import { resolveLinkBranding, STUDIO_BRAND } from '../../lib/branding';
 import type { Project } from '../../lib/supabase/database.types';
 
@@ -97,6 +98,23 @@ assert(html.includes('id="t-brand-name"') && html.includes('value="الأفق"')
 assert(/id="t-hide-viewer-name"[^>]*checked/.test(html), 'Hide-name toggle reflects its state');
 html = render(<LinkBrandingFields idPrefix="t" value={DEFAULT_LINK_BRANDING} onChange={noop} />);
 assert(!html.includes('id="t-brand-name"'), 'Name field is hidden unless custom mode is chosen');
+
+console.log('\n>>> 5. Share-window quick editor');
+const baseLink = {
+  id: 'l1',
+  viewer_name: 'مصطفى',
+  slug: 's',
+  password_hash: '',
+  enabled: true,
+  session_version: 1,
+  created_at: new Date().toISOString(),
+};
+html = render(<LinkIdentityQuickEdit link={baseLink} onSaved={noop} />);
+assert(html.includes('هوية الاستوديو • الاسم ظاهر') && html.includes('تغيير الهوية'), 'Default link shows its studio identity and a change button');
+html = render(
+  <LinkIdentityQuickEdit link={{ ...baseLink, branding_mode: 'neutral', hide_viewer_name: true }} onSaved={noop} />
+);
+assert(html.includes('هوية محايدة') && html.includes('الاسم مخفي'), 'Neutral + hidden link shows both tags');
 
 console.log('\n================================================================');
 console.log(`SUITE 18b RESULTS: ${passed} PASSED, ${failed} FAILED`);

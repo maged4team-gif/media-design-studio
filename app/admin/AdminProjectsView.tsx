@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { Project, AccessLink, ProjectStatus, PROJECT_STATUS_LABELS, PROJECT_STATUS_COLORS } from '@/lib/supabase/database.types';
 import { AdminNavbar } from '@/components/admin/AdminNavbar';
+import { LinkIdentityQuickEdit } from '@/components/admin/LinkIdentityQuickEdit';
 import {
   FolderKanban,
   PlusCircle,
@@ -48,7 +49,7 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
   systemStatus,
 }) => {
   const [projects, setProjects] = useState<Project[]>(initialProjects);
-  const [links] = useState<(AccessLink & { project_ids: string[] })[]>(initialLinks);
+  const [links, setLinks] = useState<(AccessLink & { project_ids: string[] })[]>(initialLinks);
   const [showStatusBanner, setShowStatusBanner] = useState(true);
   const [editingProgressId, setEditingProgressId] = useState<string | null>(null);
   const [progressVal, setProgressVal] = useState<number>(0);
@@ -963,7 +964,7 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
                     <h3 className="text-base font-bold text-white">مشاركة مشروع: {sharingProject.title}</h3>
                   </div>
                   <p className="mt-1 text-xs text-studio-text-secondary">
-                    اختر العميل لنسخ رابط المشروع المباشر أو رابطه العام
+                    اختر العميل لنسخ رابط المشروع المباشر أو رابطه العام، ويمكنك تغيير ما يظهر له من هنا
                   </p>
                 </div>
                 <button
@@ -975,7 +976,7 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
                 </button>
               </div>
 
-              <div className="mt-4 max-h-[60vh] overflow-y-auto space-y-3">
+              <div className="mt-4 max-h-[70vh] overflow-y-auto space-y-3">
                 {(() => {
                   const assignedLinks = links.filter((l) =>
                     l.project_ids?.includes(sharingProject.id)
@@ -1035,6 +1036,14 @@ export const AdminProjectsView: React.FC<AdminProjectsViewProps> = ({
                             {link.slug}
                           </span>
                         </div>
+
+                        {/* Page identity (studio / neutral / custom) and viewer-name visibility */}
+                        <LinkIdentityQuickEdit
+                          link={link}
+                          onSaved={(linkId, identity) =>
+                            setLinks((prev) => prev.map((l) => (l.id === linkId ? { ...l, ...identity } : l)))
+                          }
+                        />
 
                         {/* Direct Project Link */}
                         <div className="rounded-lg bg-studio-blue/10 border border-studio-blue/20 p-2.5">
