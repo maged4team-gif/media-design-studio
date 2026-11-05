@@ -8,7 +8,7 @@ import {
 import { ProjectStatus, PROJECT_STATUS_LABELS, PROJECT_STATUS_COLORS } from '../../lib/supabase/database.types';
 import { PATCH as updateProjectHandler } from '../../app/api/admin/projects/[id]/route';
 import { POST as createProjectHandler } from '../../app/api/admin/projects/route';
-import { createSignedToken } from '../../lib/auth/session';
+import { createAdminSessionToken } from '../../lib/auth/session';
 
 async function runTestSuite() {
   console.log('================================================================');
@@ -224,9 +224,7 @@ async function runTestSuite() {
   // -----------------------------------------------------------------
   console.log('\n>>> 7. Testing API Handlers...');
 
-  const mockAdminToken = createSignedToken(
-    { isAdmin: true, expiresAt: Date.now() + 60 * 60 * 1000 }
-  );
+  const mockAdminToken = createAdminSessionToken(60 * 60 * 1000);
 
   await test('POST /api/admin/projects creates project with code and validated status', async () => {
     const req = new Request('http://localhost:3000/api/admin/projects', {

@@ -8,7 +8,7 @@ process.env.GOOGLE_CLIENT_SECRET = 'mock-client-secret';
 import { dataService } from '../../lib/data/service';
 import { POST as initHandler } from '../../app/api/admin/drive/upload/init/route';
 import { POST as registerHandler } from '../../app/api/admin/drive/upload/register/route';
-import { createSignedToken } from '../../lib/auth/session';
+import { createAdminSessionToken } from '../../lib/auth/session';
 
 let passed = 0;
 let failed = 0;
@@ -29,10 +29,7 @@ async function runConcurrencyTests() {
   console.log('================================================================\n');
 
   // Prepare authenticated admin session
-  const adminToken = createSignedToken({
-    isAdmin: true,
-    expiresAt: Date.now() + 1000 * 60 * 60, // 1 hour
-  });
+  const adminToken = createAdminSessionToken(1000 * 60 * 60);
 
   // -------------------------------------------------------------
   // 1. Testing Atomic Compare-And-Set: claimProjectDriveFolder

@@ -16,7 +16,7 @@ import { PATCH as projectPatchHandler } from '../../app/api/admin/projects/[id]/
 
 import { dataService, resolveProjectCoverUrl, isStoragePathReferenced } from '../../lib/data/service';
 import { isServerSupabaseConfigured, getServerSupabase } from '../../lib/supabase/server';
-import { createSignedToken } from '../../lib/auth/session';
+import { createSignedToken, createAdminSessionToken } from '../../lib/auth/session';
 
 let passed = 0;
 let failed = 0;
@@ -130,10 +130,7 @@ async function runHttpTests() {
       expiresAt: Date.now() + 3600000,
     });
 
-    const adminToken = createSignedToken({
-      isAdmin: true,
-      expiresAt: Date.now() + 3600000,
-    });
+    const adminToken = createAdminSessionToken(3600000);
 
     console.log('\n>>> 2. Testing /api/client/auth Route (Status, Payload, Cookies)...');
     // Invalid password -> 401

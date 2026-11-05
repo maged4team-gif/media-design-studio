@@ -2,6 +2,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
 import { getAppSecret } from '@/lib/auth/secret';
+import { getAdminSessionsValidAfter } from '@/lib/auth/admin-revocation';
 
 function getSessionSecret(): string {
   // Throws CONFIG_ERROR in production when SESSION_SECRET is missing/short:
@@ -49,7 +50,13 @@ export interface ClientSessionData {
 export interface AdminSessionData {
   isAdmin: boolean;
   expiresAt: number;
+  /** Issued-at (ms). Tokens issued before the revocation cut-off are rejected. */
+  iat: number;
+  /** Fingerprint of ADMIN_PASSWORD: changing the password invalidates all sessions. */
+  pwd: string;
 }
+
+export const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
 /**
  * Constant-time comparison to prevent timing attacks
@@ -186,20 +193,36 @@ export async function clearClientSession(slug: string) {
 // Admin Session
 // -------------------------------------------------------------
 
-export async function setAdminSession() {
-  const cookieStore = await cookies();
+/**
+ * Keyed fingerprint of the configured admin password (never the password itself).
+ * Embedded in every admin token so rotating ADMIN_PASSWORD logs out every device.
+ */
+function adminPasswordFingerprint(): string {
+  const configured = (process.env.ADMIN_PASSWORD || '').trim().replace(/^["']|["']$/g, '');
+  return crypto.createHmac('sha256', getSessionSecret()).update(`admin-password-fingerprint:v1:${configured}`).digest('base64url').slice(0, 22);
+}
+
+/**
+ * Mints a signed admin session token (also used by test suites).
+ */
+export function createAdminSessionToken(ttlMs: number = ADMIN_SESSION_TTL_MS, issuedAt: number = Date.now()): string {
   const payload: AdminSessionData = {
     isAdmin: true,
-    expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 14, // 14 days
+    iat: issuedAt,
+    expiresAt: issuedAt + ttlMs,
+    pwd: adminPasswordFingerprint(),
   };
-  const token = createSignedToken(payload);
+  return createSignedToken(payload);
+}
 
-  cookieStore.set('admin_session', token, {
+export async function setAdminSession() {
+  const cookieStore = await cookies();
+  cookieStore.set('admin_session', createAdminSessionToken(), {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: 60 * 60 * 24 * 14,
+    maxAge: Math.floor(ADMIN_SESSION_TTL_MS / 1000),
   });
 }
 
@@ -231,8 +254,20 @@ export async function getAdminSession(cookieOrTokenOverride?: string): Promise<b
     typeof session.isAdmin !== 'boolean' ||
     !session.isAdmin ||
     typeof session.expiresAt !== 'number' ||
-    session.expiresAt < Date.now()
+    session.expiresAt < Date.now() ||
+    typeof session.iat !== 'number' ||
+    typeof session.pwd !== 'string'
   ) {
+    return false;
+  }
+
+  // ADMIN_PASSWORD rotated since this token was issued
+  if (!timingSafeEqualString(session.pwd, adminPasswordFingerprint())) {
+    return false;
+  }
+
+  // Revoked via "log out of all devices"
+  if (session.iat < (await getAdminSessionsValidAfter())) {
     return false;
   }
 

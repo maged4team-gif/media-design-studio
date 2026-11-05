@@ -4,7 +4,9 @@ import {
   verifyAdminPassword,
   setAdminSession,
   clearAdminSession,
+  getAdminSession,
 } from '@/lib/auth/session';
+import { revokeAllAdminSessions } from '@/lib/auth/admin-revocation';
 import { checkRateLimit, recordRateLimitAttempt, resetRateLimit, getClientIp } from '@/lib/auth/rate-limit';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
 
@@ -93,6 +95,24 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   if (!verifyRequestOrigin(req)) {
     return NextResponse.json({ error: 'طلب غير مصرح به' }, { status: 403 });
+  }
+
+  // ?scope=all → revoke every admin session on every device (requires a valid session,
+  // so an unauthenticated caller cannot log the admin out everywhere)
+  const scope = new URL(req.url).searchParams.get('scope');
+  if (scope === 'all') {
+    if (!(await getAdminSession())) {
+      return NextResponse.json({ error: 'غير مصرح للوصول لهذه العملية' }, { status: 401 });
+    }
+    try {
+      await revokeAllAdminSessions();
+    } catch (error: any) {
+      console.error('[Admin Auth] Failed to revoke all admin sessions:', error?.message);
+      const message = String(error?.message || '').startsWith('MIGRATION_REQUIRED')
+        ? error.message.replace(/^MIGRATION_REQUIRED:\s*/, '')
+        : 'تعذر تسجيل الخروج من جميع الأجهزة';
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
   }
 
   await clearAdminSession();

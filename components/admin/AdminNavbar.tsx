@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Tv, FolderKanban, Link2, PlusCircle, LogOut, Cloud } from 'lucide-react';
+import { Tv, FolderKanban, Link2, PlusCircle, LogOut, Cloud, ShieldOff } from 'lucide-react';
 import { NotificationsDropdown } from './NotificationsDropdown';
 
 export const AdminNavbar: React.FC = () => {
@@ -11,7 +11,21 @@ export const AdminNavbar: React.FC = () => {
   const router = useRouter();
 
   const handleLogout = async () => {
-    await fetch('/api/admin/auth', { method: 'DELETE' });
+    await fetch('/api/admin/login', { method: 'DELETE' });
+    router.push('/admin/login');
+    router.refresh();
+  };
+
+  const handleLogoutAllDevices = async () => {
+    if (!window.confirm('سيتم تسجيل الخروج من لوحة الإدارة على جميع الأجهزة، بما فيها هذا الجهاز. هل تريد المتابعة؟')) {
+      return;
+    }
+    const res = await fetch('/api/admin/login?scope=all', { method: 'DELETE' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      window.alert(body?.error || 'تعذر تسجيل الخروج من جميع الأجهزة');
+      return;
+    }
     router.push('/admin/login');
     router.refresh();
   };
@@ -96,6 +110,16 @@ export const AdminNavbar: React.FC = () => {
             >
               <LogOut className="h-4 w-4" />
               <span className="hidden md:inline">خروج</span>
+            </button>
+
+            {/* Logout from all devices */}
+            <button
+              onClick={handleLogoutAllDevices}
+              className="flex items-center rounded-xl border border-white/5 bg-studio-surface px-2.5 py-2 text-xs text-studio-text-muted hover:bg-red-500/10 hover:border-red-500/20 hover:text-red-400 transition"
+              title="تسجيل الخروج من جميع الأجهزة"
+              aria-label="تسجيل الخروج من جميع الأجهزة"
+            >
+              <ShieldOff className="h-4 w-4" />
             </button>
           </nav>
         </div>

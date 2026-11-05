@@ -15,7 +15,7 @@ import { dataService } from '../../lib/data/service';
 import { deleteDriveFileOrFolder } from '../../lib/drive/client';
 import { DELETE as batchDeleteHandler } from '../../app/api/admin/projects/route';
 import { DELETE as singleDeleteHandler } from '../../app/api/admin/projects/[id]/route';
-import { createSignedToken } from '../../lib/auth/session';
+import { createAdminSessionToken } from '../../lib/auth/session';
 
 let passed = 0;
 let failed = 0;
@@ -84,9 +84,7 @@ async function runTests() {
   console.log('SUITE 13: RESILIENT DRIVE CLEANUP & SAFE PROJECT DELETION TESTS');
   console.log('================================================================\n');
 
-  const mockAdminToken = createSignedToken(
-    { isAdmin: true, expiresAt: Date.now() + 60 * 60 * 1000 }
-  );
+  const mockAdminToken = createAdminSessionToken(60 * 60 * 1000);
 
   // -------------------------------------------------------------
   // 1. deleteDriveFileOrFolder Unit Tests

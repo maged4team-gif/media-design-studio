@@ -15,7 +15,9 @@ import { getAppSecret } from '../../lib/auth/secret';
 import { sealLinkPassword, revealLinkPassword, isSealedLinkPassword } from '../../lib/auth/link-password-vault';
 import { dataService } from '../../lib/data/service';
 import { POST as clientAuthHandler } from '../../app/api/client/auth/route';
-import { POST as adminLoginHandler } from '../../app/api/admin/login/route';
+import { POST as adminLoginHandler, DELETE as adminLogoutHandler } from '../../app/api/admin/login/route';
+import { createAdminSessionToken, createSignedToken, getAdminSession } from '../../lib/auth/session';
+import { revokeAllAdminSessions, resetAdminRevocationCache } from '../../lib/auth/admin-revocation';
 
 let passed = 0;
 let failed = 0;
@@ -150,6 +152,41 @@ async function runTests() {
     }
   }
   assert(adminBlockedAt === 20, 'Admin global limit blocks the 21st guess', `blocked at ${adminBlockedAt}`);
+
+  console.log('\n>>> 7. Admin sessions are revocable');
+  const revocationFile = path.join(dataDir, 'admin-security.json');
+  if (fs.existsSync(revocationFile)) fs.unlinkSync(revocationFile);
+  resetAdminRevocationCache();
+
+  const tokenBefore = createAdminSessionToken();
+  assert(await getAdminSession(tokenBefore), 'Fresh admin token is accepted');
+  assert(
+    !(await getAdminSession(createSignedToken({ isAdmin: true, expiresAt: Date.now() + 3600000 }))),
+    'Legacy-format admin token (no iat / fingerprint) is rejected'
+  );
+
+  process.env.ADMIN_PASSWORD = 'rotated-admin-password-abc';
+  assert(!(await getAdminSession(tokenBefore)), 'Changing ADMIN_PASSWORD invalidates existing sessions');
+  const tokenAfterRotation = createAdminSessionToken();
+  assert(await getAdminSession(tokenAfterRotation), 'Token issued after password change is accepted');
+
+  // Unauthenticated callers cannot trigger logout-everywhere
+  const r = await adminLogoutHandler(
+    new Request('http://localhost:3000/api/admin/login?scope=all', {
+      method: 'DELETE',
+      headers: { origin: 'http://localhost:3000', host: 'localhost:3000' },
+    })
+  );
+  assert(r.status === 401, 'Logout-all without a valid admin session is rejected');
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await revokeAllAdminSessions();
+  assert(!(await getAdminSession(tokenAfterRotation)), 'Revoke-all invalidates tokens issued before it');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert(await getAdminSession(createAdminSessionToken()), 'New login after revoke-all is accepted');
+
+  if (fs.existsSync(revocationFile)) fs.unlinkSync(revocationFile);
+  resetAdminRevocationCache();
 
   await dataService.deleteProject(project.id).catch(() => false);
 

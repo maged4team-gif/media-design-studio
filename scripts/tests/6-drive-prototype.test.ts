@@ -28,7 +28,7 @@ import { POST as legacyDirectUploadHandler } from '../../app/api/admin/upload/ro
 import { GET as mediaDeliveryHandler } from '../../app/api/media/[assetId]/route';
 import { dataService, resolveAssetPlaybackUrl, resolveAssetThumbnailUrl } from '../../lib/data/service';
 import { formatClientMediaUrl } from '../../lib/utils/formatters';
-import { createSignedToken } from '../../lib/auth/session';
+import { createSignedToken, createAdminSessionToken } from '../../lib/auth/session';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -78,15 +78,8 @@ async function runDrivePrototypeTests() {
   process.env.GOOGLE_CLIENT_SECRET = 'test-mock-client-secret';
   process.env.GOOGLE_DRIVE_REFRESH_TOKEN = '1//mock-refresh-token-testing-value';
 
-  const mockAdminToken = createSignedToken({
-    isAdmin: true,
-    expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 14,
-  });
-  const otherAdminToken = createSignedToken({
-    isAdmin: true,
-    expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 14,
-    nonce: 'different_admin_session_nonce',
-  });
+  const mockAdminToken = createAdminSessionToken();
+  const otherAdminToken = createAdminSessionToken(undefined, Date.now() - 1000); // distinct admin session
 
   // =============================================================
   // 1. OAuth State Anti-CSRF Protection & Token Security
