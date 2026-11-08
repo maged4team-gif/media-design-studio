@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { UPLOAD_ACCEPT_ATTRIBUTE } from '@/lib/upload/file-types';
 import {
   Upload,
   AlertCircle,
@@ -869,7 +870,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({ projectId, onUploa
           ref={fileInputRef}
           type="file"
           multiple
-          accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.pdf,.zip,.rar,.ai,.psd,.aep,.c4d"
+          accept={UPLOAD_ACCEPT_ATTRIBUTE}
           onChange={(e) => {
             if (e.target.files) {
               handleAddFiles(e.target.files);

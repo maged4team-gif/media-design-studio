@@ -3,6 +3,7 @@ import { getAdminSession, extractCookieFromRequest } from '@/lib/auth/session';
 import { dataService } from '@/lib/data/service';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
 import { normalizeBrandingInput } from '@/lib/branding';
+import { normalizeLinkControlsInput } from '@/lib/link-controls';
 import { mapLinkError } from '../errors';
 
 interface RouteProps {
@@ -34,6 +35,10 @@ export async function PATCH(req: Request, { params }: RouteProps) {
       brandName: body.brandName,
       hideViewerName: body.hideViewerName,
     });
+    const controls = normalizeLinkControlsInput({
+      expiresAt: body.expiresAt,
+      allowDownload: body.allowDownload,
+    });
 
     const success = await dataService.updateAccessLink(id, {
       viewerName: typeof body.viewerName === 'string' ? body.viewerName.trim() : undefined,
@@ -42,6 +47,7 @@ export async function PATCH(req: Request, { params }: RouteProps) {
       enabled: body.enabled,
       removePassword: body.removePassword,
       branding,
+      controls,
     });
 
     return NextResponse.json({ success });

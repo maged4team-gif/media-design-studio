@@ -143,6 +143,8 @@ export type AccessLink = {
   brand_name?: string | null;
   /** Recipient never sees viewer_name (it stays an admin-only label). */
   hide_viewer_name?: boolean;
+  expires_at?: string | null;
+  allow_download?: boolean;
 };
 
 export type BrandingMode = 'studio' | 'neutral' | 'custom';

@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS access_links (
     branding_mode VARCHAR(16) NOT NULL DEFAULT 'studio' CHECK (branding_mode IN ('studio', 'neutral', 'custom')),
     brand_name VARCHAR(80),
     hide_viewer_name BOOLEAN NOT NULL DEFAULT false,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    allow_download BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
@@ -260,6 +262,11 @@ VALUES (
       'image/jpeg', 'image/png', 'image/webp', 'image/svg+xml', 'image/gif',
       'application/pdf', 'application/zip', 'application/x-zip-compressed',
       'image/vnd.adobe.photoshop', 'application/x-photoshop',
+      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'text/plain', 'text/csv',
+      'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/ogg',
       'application/octet-stream'
     ]
 )
@@ -271,6 +278,11 @@ ON CONFLICT (id) DO UPDATE SET
       'image/jpeg', 'image/png', 'image/webp', 'image/svg+xml', 'image/gif',
       'application/pdf', 'application/zip', 'application/x-zip-compressed',
       'image/vnd.adobe.photoshop', 'application/x-photoshop',
+      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'text/plain', 'text/csv',
+      'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/ogg',
       'application/octet-stream'
     ];
 

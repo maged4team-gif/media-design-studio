@@ -4,6 +4,8 @@ import { notFound } from 'next/navigation';
 import { dataService } from '@/lib/data/service';
 import { getClientSession } from '@/lib/auth/session';
 import { resolveLinkBranding, visibleViewerName } from '@/lib/branding';
+import { isLinkExpired } from '@/lib/link-controls';
+import { LinkExpiredNotice } from './LinkExpiredNotice';
 import { PasswordGate } from './PasswordGate';
 import { ClientHomeView } from './ClientHomeView';
 import { buildClientMetadata, getClientLink } from './link-context';
@@ -34,6 +36,10 @@ export default async function ClientSlugPage({ params }: PageProps) {
   }
 
   const branding = resolveLinkBranding(link);
+  if (isLinkExpired(link)) {
+    return <LinkExpiredNotice branding={branding} />;
+  }
+
   const viewerName = visibleViewerName(link);
 
   // 2. Check if this client has an authenticated session cookie, valid session_version, and matching linkId

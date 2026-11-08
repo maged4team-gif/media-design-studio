@@ -19,6 +19,8 @@ interface ProjectDetailViewProps {
   initialAssets: Asset[];
   isDirect?: boolean;
   branding?: LinkBranding;
+  /** false on view-only links: download controls are not shown. */
+  allowDownload?: boolean;
 }
 
 type FilterTab = 'all' | 'video' | 'image' | 'file';
@@ -31,6 +33,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   initialAssets,
   isDirect = false,
   branding = resolveLinkBranding(null),
+  allowDownload = true,
 }) => {
   const router = useRouter();
   const footerText = buildClientFooterText(branding, 'استوديو التصميم التلفزيوني والإعلامي • جميع الحقوق محفوظة');
@@ -378,6 +381,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   onToggleApproval={() => handleToggleApproval(asset)}
                   approvalLoading={approvalLoadingId === asset.id}
                   allowFeedback={project.allow_feedback !== false}
+                  allowDownload={allowDownload}
                 />
               ))}
             </div>
@@ -407,6 +411,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         approvalLoading={selectedAsset ? approvalLoadingId === selectedAsset.id : false}
         onAddComment={handleAddComment}
         allowFeedback={project.allow_feedback !== false}
+        allowDownload={allowDownload}
       />
 
       {footerText && (

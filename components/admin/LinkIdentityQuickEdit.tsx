@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { AlertCircle, Check, Palette } from 'lucide-react';
 import type { AccessLink } from '@/lib/supabase/database.types';
 import { LinkBrandingFields, describeLinkBranding, type LinkBrandingState } from './LinkBrandingFields';
+import { LinkControlTags } from './LinkControlsFields';
 
 type IdentityFields = Pick<AccessLink, 'branding_mode' | 'brand_name' | 'hide_viewer_name'>;
 
@@ -98,6 +99,7 @@ export const LinkIdentityQuickEdit: React.FC<LinkIdentityQuickEditProps> = ({ li
           ) : (
             <span className="text-[10px] font-semibold text-studio-text-muted">هوية الاستوديو • الاسم ظاهر</span>
           )}
+          <LinkControlTags link={link} />
           {justSaved && (
             <span className="flex items-center gap-0.5 text-[10px] font-semibold text-emerald-400">
               <Check className="h-3 w-3" />

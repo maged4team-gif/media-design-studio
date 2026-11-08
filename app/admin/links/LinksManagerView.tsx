@@ -10,6 +10,13 @@ import {
   type LinkBrandingState,
 } from '@/components/admin/LinkBrandingFields';
 import {
+  LinkControlsFields,
+  LinkControlTags,
+  DEFAULT_LINK_CONTROLS,
+  type LinkControlsState,
+} from '@/components/admin/LinkControlsFields';
+import { isLinkExpired, linkAllowsDownload } from '@/lib/link-controls';
+import {
   Link2,
   PlusCircle,
   Copy,
@@ -44,6 +51,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
   const [isPublic, setIsPublic] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [branding, setBranding] = useState<LinkBrandingState>(DEFAULT_LINK_BRANDING);
+  const [controls, setControls] = useState<LinkControlsState>(DEFAULT_LINK_CONTROLS);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -66,6 +74,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
   const [editIsPublic, setEditIsPublic] = useState(false);
   const [editSelectedProjectIds, setEditSelectedProjectIds] = useState<string[]>([]);
   const [editBranding, setEditBranding] = useState<LinkBrandingState>(DEFAULT_LINK_BRANDING);
+  const [editControls, setEditControls] = useState<LinkControlsState>(DEFAULT_LINK_CONTROLS);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
 
@@ -79,6 +88,10 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
       brandingMode: link.branding_mode || 'studio',
       brandName: link.brand_name || '',
       hideViewerName: Boolean(link.hide_viewer_name),
+    });
+    setEditControls({
+      expiresAt: link.expires_at ?? null,
+      allowDownload: linkAllowsDownload(link),
     });
     setEditError('');
   };
@@ -148,6 +161,12 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
       setEditError('يرجى كتابة الاسم المخصص الذي سيظهر للمستلم');
       return;
     }
+    // An already-expired date left untouched is not re-sent, so other edits stay possible
+    const expiryChanged = editControls.expiresAt !== (editingLink.expires_at ?? null);
+    if (expiryChanged && editControls.expiresAt && isLinkExpired({ expires_at: editControls.expiresAt })) {
+      setEditError('يجب أن يكون موعد انتهاء الرابط في المستقبل');
+      return;
+    }
 
     setEditSaving(true);
     setEditError('');
@@ -157,6 +176,8 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
         viewerName: editViewerName.trim(),
         projectIds: editSelectedProjectIds,
         ...brandingPayload(editBranding),
+        allowDownload: editControls.allowDownload,
+        ...(expiryChanged ? { expiresAt: editControls.expiresAt } : {}),
       };
 
       if (editIsPublic) {
@@ -193,6 +214,8 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
               branding_mode: editBranding.brandingMode,
               brand_name: editBranding.brandingMode === 'custom' ? editBranding.brandName.trim() : null,
               hide_viewer_name: editBranding.hideViewerName,
+              expires_at: editControls.expiresAt,
+              allow_download: editControls.allowDownload,
             };
           })
         );
@@ -228,6 +251,10 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
       setError('يرجى كتابة الاسم المخصص الذي سيظهر للمستلم');
       return;
     }
+    if (controls.expiresAt && isLinkExpired({ expires_at: controls.expiresAt })) {
+      setError('يجب أن يكون موعد انتهاء الرابط في المستقبل');
+      return;
+    }
 
     setSaving(true);
     setError('');
@@ -241,6 +268,8 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
           password: isPublic ? '' : password.trim(),
           projectIds: selectedProjectIds,
           ...brandingPayload(branding),
+          expiresAt: controls.expiresAt,
+          allowDownload: controls.allowDownload,
         }),
       });
 
@@ -255,6 +284,7 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
         setIsPublic(false);
         setSelectedProjectIds([]);
         setBranding(DEFAULT_LINK_BRANDING);
+        setControls(DEFAULT_LINK_CONTROLS);
       }
     } catch {
       setError('حدث خطأ في الاتصال بالخادم');
@@ -372,18 +402,17 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
                         <span className="text-[11px] text-studio-text-muted font-mono">
                           /p/{link.slug}
                         </span>
-                        {describeLinkBranding(link).length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {describeLinkBranding(link).map((tag) => (
-                              <span
-                                key={tag}
-                                className="rounded-md border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-300"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        <div className="mt-1 flex flex-wrap gap-1 empty:hidden">
+                          {describeLinkBranding(link).map((tag) => (
+                            <span
+                              key={tag}
+                              className="rounded-md border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-300"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                          <LinkControlTags link={link} />
+                        </div>
                       </div>
                     </div>
 
@@ -722,6 +751,9 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
                 {/* Page identity & viewer-name visibility */}
                 <LinkBrandingFields idPrefix="create-link" value={branding} onChange={setBranding} />
 
+                {/* Expiry date & download permission */}
+                <LinkControlsFields idPrefix="create-link" value={controls} onChange={setControls} />
+
                 {/* Projects Assignment */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -876,6 +908,9 @@ export const LinksManagerView: React.FC<LinksManagerViewProps> = ({ initialLinks
 
                 {/* Page identity & viewer-name visibility */}
                 <LinkBrandingFields idPrefix="edit-link" value={editBranding} onChange={setEditBranding} />
+
+                {/* Expiry date & download permission */}
+                <LinkControlsFields idPrefix="edit-link" value={editControls} onChange={setEditControls} />
 
                 {/* Projects Assignment */}
                 <div>

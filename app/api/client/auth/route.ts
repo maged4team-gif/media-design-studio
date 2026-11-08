@@ -3,6 +3,7 @@ import { dataService } from '@/lib/data/service';
 import { setClientSession, clearClientSession } from '@/lib/auth/session';
 import { checkRateLimit, recordRateLimitAttempt, resetRateLimit, getClientIp } from '@/lib/auth/rate-limit';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
+import { isLinkActive } from '@/lib/link-controls';
 import bcrypt from 'bcryptjs';
 
 export const dynamic = 'force-dynamic';
@@ -68,7 +69,7 @@ export async function POST(req: Request) {
 
     const link = await dataService.getAccessLinkAuthDataBySlug(slug);
     // Generic safe error message to prevent link enumeration / probing attacks
-    if (!link || !link.enabled) {
+    if (!link || !isLinkActive(link)) {
       recordRateLimitAttempt(rateLimitKey);
       return NextResponse.json({ error: 'رابط الوصول غير صالح أو تم إيقافه' }, { status: 401 });
     }

@@ -2,6 +2,7 @@ import 'server-only';
 import { getClientSession, ClientSessionData } from '@/lib/auth/session';
 import { dataService } from '@/lib/data/service';
 import { AccessLink, Project, Asset } from '@/lib/supabase/database.types';
+import { isLinkExpired } from '@/lib/link-controls';
 
 export interface AuthorizationSuccess<T = void> {
   ok: true;
@@ -38,6 +39,11 @@ export async function authorizeClientSession(
   const link = await dataService.getAccessLinkBySlug(slug);
   if (!link || !link.enabled) {
     return { ok: false, error: 'تم تعطيل رابط الوصول أو حذفه', status: 403 };
+  }
+
+  // Expiry applies to existing sessions too, not only to new logins
+  if (isLinkExpired(link)) {
+    return { ok: false, error: 'انتهت صلاحية رابط الوصول', status: 403 };
   }
 
   // Strict linkId match enforcement

@@ -372,7 +372,7 @@ export function getFileCategory(name: string, mimeType?: string): 'video' | 'ima
   if (type.startsWith('audio/') || ['mp3', 'wav', 'aac', 'ogg', 'm4a'].includes(ext)) {
     return 'audio';
   }
-  if (['pdf', 'doc', 'docx', 'txt', 'zip', 'rar', '7z'].includes(ext)) {
+  if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'zip', 'rar', '7z'].includes(ext)) {
     return 'document';
   }
   return 'other';

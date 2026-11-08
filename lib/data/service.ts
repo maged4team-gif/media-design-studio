@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import { sealLinkPassword, sealIfNeeded, isSealedLinkPassword, revealLinkPassword } from '@/lib/auth/link-password-vault';
 import { generateSlug } from '@/lib/utils/slug';
 import { isBrandingMode, type BrandingInput } from '@/lib/branding';
+import type { LinkControlsInput } from '@/lib/link-controls';
 import { deleteDriveFileOrFolder } from '@/lib/drive/client';
 import fs from 'fs';
 import path from 'path';
@@ -941,7 +942,7 @@ function isMissingBrandingColumnError(error: { code?: string; message?: string }
   return (
     error.code === '42703' ||
     error.code === 'PGRST204' ||
-    /branding_mode|brand_name|hide_viewer_name/.test(error.message || '')
+    /branding_mode|brand_name|hide_viewer_name|expires_at|allow_download/.test(error.message || '')
   );
 }
 
@@ -973,6 +974,32 @@ function brandingNeedsMigration(input: BrandingInput): boolean {
 const BRANDING_MIGRATION_REQUIRED =
   'MIGRATION_REQUIRED: إعدادات هوية الصفحة تحتاج تطبيق Migration 013 (access_link_branding) في Supabase أولاً.';
 
+// Per-link access controls (migration 014). Same degradation: without the columns
+// a link never expires and downloads stay allowed, as before the migration.
+const LINK_CONTROL_COLUMNS = 'expires_at, allow_download';
+
+function pickLinkControls(row: any): Pick<AccessLink, 'expires_at' | 'allow_download'> {
+  return {
+    expires_at: typeof row?.expires_at === 'string' && row.expires_at ? row.expires_at : null,
+    allow_download: row?.allow_download !== false,
+  };
+}
+
+function linkControlsToColumns(input: LinkControlsInput): Record<string, unknown> {
+  const cols: Record<string, unknown> = {};
+  if (input.expiresAt !== undefined) cols.expires_at = input.expiresAt;
+  if (input.allowDownload !== undefined) cols.allow_download = input.allowDownload;
+  return cols;
+}
+
+/** True when the requested controls differ from what an un-migrated DB implicitly serves. */
+function linkControlsNeedMigration(input: LinkControlsInput): boolean {
+  return Boolean(input.expiresAt) || input.allowDownload === false;
+}
+
+const LINK_CONTROLS_MIGRATION_REQUIRED =
+  'MIGRATION_REQUIRED: تاريخ الانتهاء ومنع التحميل يحتاجان تطبيق Migration 014 (access_link_controls) في Supabase أولاً.';
+
 // -------------------------------------------------------------
 // Data Access Service (Strict Single Source of Truth)
 // -------------------------------------------------------------
@@ -987,9 +1014,20 @@ export const dataService = {
           const baseColumns = 'id, viewer_name, slug, password_hash, enabled, session_version, created_at, access_link_projects(project_id)';
           let { data, error } = await supabase
             .from('access_links')
-            .select(`${baseColumns}, ${LINK_BRANDING_COLUMNS}`)
+            .select(`${baseColumns}, ${LINK_BRANDING_COLUMNS}, ${LINK_CONTROL_COLUMNS}`)
             .eq('slug', slug)
             .maybeSingle();
+
+          // Migration 014 not applied yet: no expiry, downloads allowed
+          if (error && isMissingBrandingColumnError(error)) {
+            const retry = await supabase
+              .from('access_links')
+              .select(`${baseColumns}, ${LINK_BRANDING_COLUMNS}`)
+              .eq('slug', slug)
+              .maybeSingle();
+            data = retry.data as any;
+            error = retry.error;
+          }
 
           // Migration 013 not applied yet: serve the link with the default studio identity
           if (error && isMissingBrandingColumnError(error)) {
@@ -1017,6 +1055,7 @@ export const dataService = {
               created_at: data.created_at,
               project_ids: data.access_link_projects?.map((alp: { project_id: string }) => alp.project_id) || [],
               ...pickLinkBranding(data),
+              ...pickLinkControls(data),
             };
           } else if (error) {
             reportSupabaseFailure(error);
@@ -1050,6 +1089,7 @@ export const dataService = {
       created_at: link.created_at,
       project_ids: link.project_ids,
       ...pickLinkBranding(link),
+      ...pickLinkControls(link),
     };
   },
 
@@ -1058,11 +1098,19 @@ export const dataService = {
     const supabase = getServerSupabase();
     if (supabase) {
       try {
-        const { data, error } = await supabase
+        const authColumns = 'id, viewer_name, slug, password_hash, enabled, session_version, created_at';
+        let { data, error } = await supabase
           .from('access_links')
-          .select('id, viewer_name, slug, password_hash, enabled, session_version, created_at')
+          .select(`${authColumns}, expires_at`)
           .eq('slug', slug)
           .maybeSingle();
+
+        // Migration 014 not applied yet: links have no expiry
+        if (error && isMissingBrandingColumnError(error)) {
+          const retry = await supabase.from('access_links').select(authColumns).eq('slug', slug).maybeSingle();
+          data = retry.data as any;
+          error = retry.error;
+        }
 
         if (!error && data) {
           reportSupabaseSuccess();
@@ -1106,6 +1154,7 @@ export const dataService = {
       session_version: link.session_version ?? 1,
       created_at: link.created_at,
       has_password: hasPassword,
+      expires_at: link.expires_at ?? null,
     };
   },
 
@@ -2489,8 +2538,18 @@ export const dataService = {
         const baseColumns = 'id, viewer_name, slug, password_hash, enabled, session_version, created_at, access_link_projects(project_id)';
         let { data, error } = await supabase
           .from('access_links')
-          .select(`${baseColumns}, password_plain, ${LINK_BRANDING_COLUMNS}`)
+          .select(`${baseColumns}, password_plain, ${LINK_BRANDING_COLUMNS}, ${LINK_CONTROL_COLUMNS}`)
           .order('created_at', { ascending: false });
+
+        // Fallback if link control columns (migration 014) are not yet present on remote DB
+        if (error && isMissingBrandingColumnError(error)) {
+          const fallbackRes = await supabase
+            .from('access_links')
+            .select(`${baseColumns}, password_plain, ${LINK_BRANDING_COLUMNS}`)
+            .order('created_at', { ascending: false });
+          data = fallbackRes.data as any;
+          error = fallbackRes.error;
+        }
 
         // Fallback if branding columns (migration 013) are not yet present on remote DB
         if (error && isMissingBrandingColumnError(error)) {
@@ -2542,6 +2601,7 @@ export const dataService = {
             created_at: link.created_at,
             project_ids: link.access_link_projects?.map((alp: { project_id: string }) => alp.project_id) || [],
             ...pickLinkBranding(link),
+      ...pickLinkControls(link),
           }));
         } else if (error) {
           console.error('[Supabase Error] Failed to fetch access links:', error.message);
@@ -2565,6 +2625,7 @@ export const dataService = {
       password_plain: revealLinkPassword(l.password_plain),
       has_password: Boolean(l.password_hash && l.password_hash.trim() !== '' && l.password_hash !== 'NO_PASSWORD'),
       ...pickLinkBranding(l),
+      ...pickLinkControls(l),
     }));
   },
 
@@ -2572,7 +2633,8 @@ export const dataService = {
     viewerName: string,
     passwordPlain: string,
     projectIds: string[],
-    branding: BrandingInput = {}
+    branding: BrandingInput = {},
+    controls: LinkControlsInput = {}
   ): Promise<AccessLink> {
     const slug = generateSlug(8);
     const hasPassword = Boolean(passwordPlain && passwordPlain.trim() !== '');
@@ -2590,6 +2652,7 @@ export const dataService = {
           enabled: true,
           session_version: 1,
           ...brandingInputToColumns(branding),
+          ...linkControlsToColumns(controls),
         };
 
         let { data: link, error } = await supabase
@@ -2598,11 +2661,32 @@ export const dataService = {
           .select('id, viewer_name, slug, enabled, session_version, created_at')
           .single();
 
+        // Migration 014 not applied: only the default controls can be stored
+        if (error && isMissingBrandingColumnError(error) && /expires_at|allow_download/.test(error.message || '')) {
+          if (linkControlsNeedMigration(controls)) {
+            throw new Error(LINK_CONTROLS_MIGRATION_REQUIRED);
+          }
+          delete insertPayload.expires_at;
+          delete insertPayload.allow_download;
+          const retryRes = await supabase
+            .from('access_links')
+            .insert(insertPayload)
+            .select('id, viewer_name, slug, enabled, session_version, created_at')
+            .single();
+          link = retryRes.data;
+          error = retryRes.error;
+        }
+
         // Migration 013 not applied: only the default identity can be stored
         if (error && isMissingBrandingColumnError(error)) {
           if (brandingNeedsMigration(branding)) {
             throw new Error(BRANDING_MIGRATION_REQUIRED);
           }
+          if (linkControlsNeedMigration(controls)) {
+            throw new Error(LINK_CONTROLS_MIGRATION_REQUIRED);
+          }
+          delete insertPayload.expires_at;
+          delete insertPayload.allow_download;
           delete insertPayload.branding_mode;
           delete insertPayload.brand_name;
           delete insertPayload.hide_viewer_name;
@@ -2650,6 +2734,7 @@ export const dataService = {
             has_password: hasPassword,
             project_ids: projectIds,
             ...pickLinkBranding(insertPayload),
+            ...pickLinkControls(insertPayload),
           };
         } else {
           console.warn('[Supabase Warning] Failed to create access link via Supabase:', error?.message);
@@ -2672,6 +2757,7 @@ export const dataService = {
       created_at: new Date().toISOString(),
       project_ids: projectIds,
       ...pickLinkBranding(brandingInputToColumns(branding)),
+      ...pickLinkControls(linkControlsToColumns(controls)),
     };
     store.access_links.unshift(newLink);
     saveLocalStore(store);
@@ -2693,11 +2779,26 @@ export const dataService = {
       enabled?: boolean;
       removePassword?: boolean;
       branding?: BrandingInput;
+      controls?: LinkControlsInput;
     }
   ): Promise<boolean> {
     const brandingColumns = brandingInputToColumns(data.branding || {});
+    const controlColumns = linkControlsToColumns(data.controls || {});
     const supabase = getServerSupabase();
     if (supabase) {
+      // Link controls first: if migration 014 is missing, fail before any other field changes
+      if (Object.keys(controlColumns).length > 0) {
+        const { error: controlsErr } = await supabase.from('access_links').update(controlColumns).eq('id', id);
+        if (controlsErr) {
+          if (!isMissingBrandingColumnError(controlsErr)) {
+            throw new Error(`تعذر حفظ إعدادات الرابط: ${controlsErr.message}`);
+          }
+          if (linkControlsNeedMigration(data.controls || {})) {
+            throw new Error(LINK_CONTROLS_MIGRATION_REQUIRED);
+          }
+        }
+      }
+
       // Page identity first: if migration 013 is missing, fail before any other field changes
       if (Object.keys(brandingColumns).length > 0) {
         const { error: brandErr } = await supabase.from('access_links').update(brandingColumns).eq('id', id);
@@ -2773,7 +2874,7 @@ export const dataService = {
       const link = store.access_links[idx];
       if (data.viewerName !== undefined) link.viewer_name = data.viewerName;
       if (data.enabled !== undefined) link.enabled = data.enabled;
-      Object.assign(link, brandingColumns);
+      Object.assign(link, brandingColumns, controlColumns);
       if (data.removePassword) {
         link.password_hash = '';
         link.password_plain = null;

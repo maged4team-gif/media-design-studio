@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 import { dataService } from '@/lib/data/service';
 import type { AccessLink, Asset } from '@/lib/supabase/database.types';
 import { buildClientPageTitle, HIDDEN_VIEWER_LABEL, resolveLinkBranding } from '@/lib/branding';
+import { getAssetPreviewKind, linkAllowsDownload } from '@/lib/link-controls';
 
 /**
  * Request-scoped lookups shared by generateMetadata and the page render,
@@ -61,4 +62,41 @@ export function maskViewerNameInAssets(assets: Asset[], link: AccessLink): Asset
       isOwn(a.access_link_id, a.viewer_name) ? { ...a, viewer_name: HIDDEN_VIEWER_LABEL } : a
     ),
   }));
+}
+
+/**
+ * A recipient sees only their own comments and approvals, never those of other
+ * links sharing the project. Records with no link (e.g. the link was deleted) count
+ * as theirs only when the stored name matches.
+ */
+export function limitEngagementToLink(assets: Asset[], link: AccessLink): Asset[] {
+  const isOwn = (accessLinkId: string | null | undefined, name: string | undefined) =>
+    accessLinkId ? accessLinkId === link.id : name === link.viewer_name;
+
+  return assets.map((asset) => ({
+    ...asset,
+    comments: asset.comments?.filter((c) => isOwn(c.access_link_id, c.author_name)),
+    approvals: asset.approvals?.filter((a) => isOwn(a.access_link_id, a.viewer_name)),
+  }));
+}
+
+/**
+ * View-only links: no direct storage addresses reach the browser. Previewable files keep
+ * their playback URL; every other file only has the protected route, which refuses it.
+ */
+export function restrictAssetDelivery(assets: Asset[], link: AccessLink): Asset[] {
+  if (linkAllowsDownload(link)) return assets;
+  return assets.map((asset) => ({
+    ...asset,
+    file_url: `/api/media/${asset.id}`,
+    storage_path: null,
+    drive_file_id: null,
+    drive_folder_id: null,
+    playback_url: getAssetPreviewKind(asset) ? asset.playback_url : `/api/media/${asset.id}`,
+  }));
+}
+
+/** Everything a project page may send to this link's browser. */
+export function prepareAssetsForLink(assets: Asset[], link: AccessLink): Asset[] {
+  return restrictAssetDelivery(maskViewerNameInAssets(limitEngagementToLink(assets, link), link), link);
 }

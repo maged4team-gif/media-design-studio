@@ -3,6 +3,7 @@ import { getAdminSession, extractCookieFromRequest } from '@/lib/auth/session';
 import { dataService } from '@/lib/data/service';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
 import { normalizeBrandingInput } from '@/lib/branding';
+import { normalizeLinkControlsInput } from '@/lib/link-controls';
 import { mapLinkError } from './errors';
 
 export async function GET(req: Request) {
@@ -46,12 +47,17 @@ export async function POST(req: Request) {
       brandName: body.brandName,
       hideViewerName: body.hideViewerName,
     });
+    const controls = normalizeLinkControlsInput({
+      expiresAt: body.expiresAt,
+      allowDownload: body.allowDownload,
+    });
 
     const link = await dataService.createAccessLink(
       viewerName.trim(),
       passwordStr,
       Array.isArray(projectIds) ? projectIds : [],
-      branding
+      branding,
+      controls
     );
 
     return NextResponse.json({ success: true, link });

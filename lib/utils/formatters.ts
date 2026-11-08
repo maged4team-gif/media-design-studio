@@ -52,7 +52,7 @@ export function getAssetTypeLabel(type: AssetType): string {
       return 'صورة';
     case 'file':
     default:
-      return 'ملف تصميم';
+      return 'ملف';
   }
 }
 

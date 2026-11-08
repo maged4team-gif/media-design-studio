@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Asset, Comment } from '@/lib/supabase/database.types';
 import { formatFileSize, formatSeconds, formatArabicDate, getAssetTypeLabel, formatClientMediaUrl } from '@/lib/utils/formatters';
 import { ApprovalBadge } from './ApprovalBadge';
+import { getAssetPreviewKind } from '@/lib/link-controls';
 import {
   X,
   Download,
@@ -14,6 +15,7 @@ import {
   FileCode,
   FileArchive,
   FileText,
+  Music,
   User,
   AlertCircle,
   RefreshCw,
@@ -34,6 +36,8 @@ interface MediaLightboxProps {
   approvalLoading?: boolean;
   onAddComment: (text: string, timestampSeconds?: number | null) => Promise<void>;
   allowFeedback?: boolean;
+  /** false on view-only links: download controls are not shown. */
+  allowDownload?: boolean;
 }
 
 export const MediaLightbox: React.FC<MediaLightboxProps> = ({
@@ -49,6 +53,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
   approvalLoading = false,
   onAddComment,
   allowFeedback = true,
+  allowDownload = true,
 }) => {
   const [commentText, setCommentText] = useState('');
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
@@ -95,6 +100,8 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
 
   const downloadUrl = `/api/media/${asset.id}?slug=${encodeURIComponent(slug)}&download=1`;
   const mediaSrc = formatClientMediaUrl(asset.playback_url, asset.id, slug);
+  const previewKind = getAssetPreviewKind(asset);
+  const blockContextMenu = allowDownload ? undefined : (e: React.MouseEvent) => e.preventDefault();
 
   const handleVideoTimeUpdate = () => {
     if (videoRef.current) {
@@ -189,7 +196,7 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
                   <div>
                     <h3 className="text-base font-bold text-white">تعذر تشغيل الفيديو</h3>
                     <p className="mt-1 text-xs text-studio-text-secondary leading-relaxed">
-                      قد يكون تنسيق الفيديو غير مدعوم في المتصفح أو أن الاتصال بالخادم تعثر. يمكنك إعادة المحاولة أو تحميل الملف للمشاهدة المباشرة.
+                      قد يكون تنسيق الفيديو غير مدعوم في المتصفح أو أن الاتصال بالخادم تعثر. {allowDownload ? 'يمكنك إعادة المحاولة أو تحميل الملف للمشاهدة المباشرة.' : 'يمكنك إعادة المحاولة.'}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center justify-center gap-3 mt-2">
@@ -202,15 +209,17 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
                       <RefreshCw className="h-3.5 w-3.5" />
                       <span>إعادة المحاولة</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={handleDownload}
-                      aria-label={`تنزيل الملف للمشاهدة المباشرة: ${asset.title}`}
-                      className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-studio-surface px-4 py-2 text-xs font-semibold text-white hover:bg-white/10 transition focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      <span>تنزيل الملف المباشر</span>
-                    </button>
+                    {allowDownload && (
+                      <button
+                        type="button"
+                        onClick={handleDownload}
+                        aria-label={`تنزيل الملف للمشاهدة المباشرة: ${asset.title}`}
+                        className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-studio-surface px-4 py-2 text-xs font-semibold text-white hover:bg-white/10 transition focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>تنزيل الملف المباشر</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -221,6 +230,8 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
                 src={mediaSrc}
                 controls
                 playsInline
+                controlsList={allowDownload ? undefined : 'nodownload'}
+                onContextMenu={blockContextMenu}
                 onTimeUpdate={handleVideoTimeUpdate}
                 onCanPlay={() => setVideoState('loaded')}
                 onLoadedData={() => setVideoState('loaded')}
@@ -235,9 +246,31 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
               <img
                 src={mediaSrc}
                 alt={asset.title}
+                draggable={allowDownload}
+                onContextMenu={blockContextMenu}
                 className="max-h-full max-w-full rounded-lg object-contain"
               />
             </div>
+          ) : previewKind === 'audio' ? (
+            <div className="flex w-full flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+              <Music className="h-20 w-20 text-violet-300" />
+              <h3 className="text-lg font-bold text-white max-w-md">{asset.title}</h3>
+              <audio
+                key={asset.id}
+                src={mediaSrc}
+                controls
+                controlsList={allowDownload ? undefined : 'nodownload'}
+                onContextMenu={blockContextMenu}
+                className="w-full max-w-md"
+              />
+            </div>
+          ) : previewKind === 'pdf' ? (
+            <iframe
+              key={asset.id}
+              src={allowDownload ? mediaSrc : `${mediaSrc}#toolbar=0`}
+              title={asset.title}
+              className="min-h-0 w-full flex-1 border-0 bg-white"
+            />
           ) : (
             <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
               {asset.title.endsWith('.zip') || asset.title.endsWith('.rar') ? (
@@ -251,15 +284,21 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
               <p className="text-sm text-studio-text-secondary">
                 {getAssetTypeLabel(asset.file_type)} • {formatFileSize(asset.file_size)}
               </p>
-              <button
-                type="button"
-                onClick={handleDownload}
-                aria-label={`تحميل الملف: ${asset.title}`}
-                className="flex items-center gap-2 rounded-xl bg-studio-blue px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-studio-blue/30 hover:bg-studio-blue-glow transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
-              >
-                <Download className="h-4 w-4" />
-                <span>تحميل الملف عبر الرابط المحمي</span>
-              </button>
+              {allowDownload ? (
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  aria-label={`تحميل الملف: ${asset.title}`}
+                  className="flex items-center gap-2 rounded-xl bg-studio-blue px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-studio-blue/30 hover:bg-studio-blue-glow transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>تحميل الملف عبر الرابط المحمي</span>
+                </button>
+              ) : (
+                <p className="max-w-sm text-xs leading-relaxed text-studio-text-muted">
+                  لا يمكن عرض هذا النوع من الملفات داخل الصفحة، والتحميل غير متاح عبر هذا الرابط.
+                </p>
+              )}
             </div>
           )}
 
@@ -287,16 +326,18 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({
               )}
 
               {/* Download */}
-              <button
-                type="button"
-                onClick={handleDownload}
-                aria-label={`تحميل الملف: ${asset.title}`}
-                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-studio-surface px-3 py-1.5 text-xs text-white hover:bg-white/10 transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
-                title="تحميل الملف"
-              >
-                <Download className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">تحميل</span>
-              </button>
+              {allowDownload && (
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  aria-label={`تحميل الملف: ${asset.title}`}
+                  className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-studio-surface px-3 py-1.5 text-xs text-white hover:bg-white/10 transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
+                  title="تحميل الملف"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">تحميل</span>
+                </button>
+              )}
 
               {/* Share */}
               <button

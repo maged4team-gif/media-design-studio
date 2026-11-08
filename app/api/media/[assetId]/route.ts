@@ -5,6 +5,7 @@ import { authorizeClientAsset } from '@/lib/auth/authorize';
 import { dataService, getDataMode } from '@/lib/data/service';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { streamFile, isDriveConfigured, getDriveThumbnailStream } from '@/lib/drive/client';
+import { getAssetPreviewKind, linkAllowsDownload } from '@/lib/link-controls';
 
 interface RouteProps {
   params: Promise<{
@@ -47,6 +48,12 @@ export async function GET(req: Request, { params }: RouteProps) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
     asset = auth.data.asset;
+
+    // View-only links: files that cannot be shown in the page would reach the browser
+    // as a plain download, so only previewable files are delivered, and only inline.
+    if (!isThumbnail && !linkAllowsDownload(auth.link) && (isDownload || !getAssetPreviewKind(asset))) {
+      return NextResponse.json({ error: 'التحميل غير متاح عبر هذا الرابط' }, { status: 403 });
+    }
   } else {
     return NextResponse.json({ error: 'غير مصرح بالوصول إلى هذا الملف' }, { status: 401 });
   }
@@ -152,7 +159,10 @@ export async function GET(req: Request, { params }: RouteProps) {
       if (isDownload) {
         const filename = encodeURIComponent(asset.original_filename || asset.title || 'download');
         headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+      } else {
+        headers.set('Content-Disposition', 'inline');
       }
+      headers.set('X-Content-Type-Options', 'nosniff');
 
       return new Response(streamRes.body, {
         status: streamRes.status,

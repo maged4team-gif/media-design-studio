@@ -4,9 +4,11 @@ import { notFound } from 'next/navigation';
 import { dataService } from '@/lib/data/service';
 import { getClientSession } from '@/lib/auth/session';
 import { resolveLinkBranding, visibleViewerName } from '@/lib/branding';
+import { isLinkExpired, linkAllowsDownload } from '@/lib/link-controls';
+import { LinkExpiredNotice } from '../../LinkExpiredNotice';
 import { ProjectDetailView } from './ProjectDetailView';
 import { PasswordGate } from '../../PasswordGate';
-import { buildClientMetadata, getClientLink, getClientProject, maskViewerNameInAssets } from '../../link-context';
+import { buildClientMetadata, getClientLink, getClientProject, prepareAssetsForLink } from '../../link-context';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -23,6 +25,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const { slug, projectId } = await params;
   const link = await getClientLink(slug);
   if (!link || !link.enabled) return buildClientMetadata(null);
+  if (isLinkExpired(link)) return buildClientMetadata(link);
   const project = await getClientProject(link.id, projectId);
   return buildClientMetadata(link, project?.title);
 }
@@ -38,13 +41,17 @@ export default async function ClientProjectPage({ params, searchParams }: PagePr
     return notFound();
   }
 
+  const branding = resolveLinkBranding(link);
+  if (isLinkExpired(link)) {
+    return <LinkExpiredNotice branding={branding} />;
+  }
+
   // 2. Strict Server-Side Authorization: Ensure project is assigned to this client
   const project = await getClientProject(link.id, projectId);
   if (!project) {
     return notFound();
   }
 
-  const branding = resolveLinkBranding(link);
   const viewerName = visibleViewerName(link);
 
   // 3. Verify client session, session_version, and matching linkId
@@ -63,7 +70,7 @@ export default async function ClientProjectPage({ params, searchParams }: PagePr
   }
 
   // 4. Fetch visible assets for this project with client slug context
-  const assets = maskViewerNameInAssets(await dataService.getAssetsForProject(projectId, true, slug), link);
+  const assets = prepareAssetsForLink(await dataService.getAssetsForProject(projectId, true, slug), link);
 
   return (
     <ProjectDetailView
@@ -74,6 +81,7 @@ export default async function ClientProjectPage({ params, searchParams }: PagePr
       initialAssets={assets}
       isDirect={isDirect}
       branding={branding}
+      allowDownload={linkAllowsDownload(link)}
     />
   );
 }

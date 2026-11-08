@@ -4,18 +4,12 @@ import { getServerSupabase } from '@/lib/supabase/server';
 import { dataService, getDataMode } from '@/lib/data/service';
 import { verifyRequestOrigin } from '@/lib/auth/csrf';
 import { isDriveConfigured, ensureArchiveRootFolder, uploadBufferToDrive } from '@/lib/drive/client';
+import { ALLOWED_UPLOAD_EXTENSIONS } from '@/lib/upload/file-types';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
 const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB limit
-
-const ALLOWED_EXTENSIONS = new Set([
-  'jpg', 'jpeg', 'png', 'webp',
-  'mp4', 'mov', 'm4v', 'webm',
-  'pdf', 'zip', 'rar',
-  'ai', 'psd', 'aep', 'c4d'
-]);
 
 export async function POST(req: Request) {
   // 1. Verify CSRF Origin
@@ -76,7 +70,7 @@ export async function POST(req: Request) {
     const originalName = file.name || 'unnamed_file';
     const ext = originalName.split('.').pop()?.toLowerCase() || '';
 
-    if (!ALLOWED_EXTENSIONS.has(ext)) {
+    if (!ALLOWED_UPLOAD_EXTENSIONS.has(ext)) {
       return NextResponse.json(
         { error: `امتداد الملف (.${ext}) غير مسموح به في منصة الاستوديو` },
         { status: 400 }

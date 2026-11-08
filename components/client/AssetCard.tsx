@@ -2,6 +2,7 @@ import React from 'react';
 import { Asset } from '@/lib/supabase/database.types';
 import { formatFileSize, formatSeconds, getAssetTypeLabel, formatClientMediaUrl, formatArabicCommentCount } from '@/lib/utils/formatters';
 import { ApprovalBadge } from './ApprovalBadge';
+import { getAssetPreviewKind } from '@/lib/link-controls';
 import {
   Play,
   Eye,
@@ -10,6 +11,7 @@ import {
   FileCode,
   FileArchive,
   FileText,
+  Music,
   Share2,
 } from 'lucide-react';
 
@@ -23,6 +25,7 @@ interface AssetCardProps {
   onToggleApproval: () => void;
   approvalLoading?: boolean;
   allowFeedback?: boolean;
+  allowDownload?: boolean;
 }
 
 export const AssetCard: React.FC<AssetCardProps> = ({
@@ -35,6 +38,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   onToggleApproval,
   approvalLoading = false,
   allowFeedback = true,
+  allowDownload = true,
 }) => {
   const commentCount = asset.comments?.length || 0;
 
@@ -67,6 +71,9 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   };
 
   const renderFileIcon = () => {
+    if (getAssetPreviewKind(asset) === 'audio') {
+      return <Music className="h-10 w-10 text-violet-300 opacity-80" />;
+    }
     if (asset.title.endsWith('.zip') || asset.title.endsWith('.rar')) {
       return <FileArchive className="h-10 w-10 text-amber-400 opacity-80" />;
     }
@@ -94,6 +101,8 @@ export const AssetCard: React.FC<AssetCardProps> = ({
             src={thumbnailDisplay || mediaDisplayUrl}
             alt={asset.title}
             referrerPolicy="no-referrer"
+            draggable={allowDownload}
+            onContextMenu={allowDownload ? undefined : (e) => e.preventDefault()}
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
           />
         ) : asset.file_type === 'video' ? (
@@ -190,16 +199,18 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           </button>
 
           {/* تحميل */}
-          <button
-            type="button"
-            aria-label={`تحميل الملف: ${asset.title}`}
-            onClick={handleDownload}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-studio-surface hover:text-white transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
-            title="تحميل الملف عبر الرابط المحمي"
-          >
-            <Download className="h-3.5 w-3.5" />
-            <span>تحميل</span>
-          </button>
+          {allowDownload && (
+            <button
+              type="button"
+              aria-label={`تحميل الملف: ${asset.title}`}
+              onClick={handleDownload}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 hover:bg-studio-surface hover:text-white transition focus-visible:ring-2 focus-visible:ring-studio-blue focus-visible:outline-none"
+              title="تحميل الملف عبر الرابط المحمي"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>تحميل</span>
+            </button>
+          )}
 
           {/* ملاحظة */}
           {allowFeedback && (
